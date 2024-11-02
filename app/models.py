@@ -1,6 +1,6 @@
 # app/models.py
 
-from sqlalchemy import Column, Integer, String, ForeignKey, Boolean, Date, JSON, Float
+from sqlalchemy import Column, DateTime, Integer, String, ForeignKey, Boolean, Date, JSON, Float
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -17,6 +17,8 @@ class League(Base):
 
     seasons = relationship("Season", back_populates="league", cascade="all, delete-orphan")
     teams = relationship("Team", back_populates="league", cascade="all, delete-orphan")
+    fixtures = relationship("Fixture", back_populates="league", cascade="all, delete-orphan")
+
 
 
 class Season(Base):
@@ -145,3 +147,55 @@ class PlayerStatistics(Base):
     player = relationship("Player", back_populates="statistics")
     team = relationship("Team")
     league = relationship("League")
+
+
+class Venue(Base):
+    __tablename__ = "venues"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=True)
+    city = Column(String, nullable=True)
+
+    fixtures = relationship("Fixture", back_populates="venue")
+
+class Fixture(Base):
+    __tablename__ = "fixtures"
+
+    fixture_id = Column(Integer, primary_key=True, index=True)
+    referee = Column(String, nullable=True)
+    timezone = Column(String, nullable=False)
+    date = Column(DateTime(timezone=True), nullable=True)
+    timestamp = Column(Integer, nullable=False)
+    venue_id = Column(Integer, ForeignKey("venues.id"), nullable=True)
+    status_long = Column(String, nullable=False)
+    status_short = Column(String, nullable=False)
+    status_elapsed = Column(Integer, nullable=True)
+    status_extra = Column(String, nullable=True)
+
+    league_id = Column(Integer, ForeignKey("leagues.league_id"), nullable=False)
+
+    season_year = Column(Integer, nullable=False)
+    round = Column(String, nullable=True)
+
+    home_team_id = Column(Integer, ForeignKey("teams.team_id"), nullable=False)
+    away_team_id = Column(Integer, ForeignKey("teams.team_id"), nullable=False)
+
+
+    goals_home = Column(Integer, nullable=True)
+    goals_away = Column(Integer, nullable=True)
+
+    score_halftime_home = Column(Integer, nullable=True)
+    score_halftime_away = Column(Integer, nullable=True)
+    score_fulltime_home = Column(Integer, nullable=True)
+    score_fulltime_away = Column(Integer, nullable=True)
+    score_extratime_home = Column(Integer, nullable=True)
+    score_extratime_away = Column(Integer, nullable=True)
+    score_penalty_home = Column(Integer, nullable=True)
+    score_penalty_away = Column(Integer, nullable=True)
+
+    home_team = relationship("Team", foreign_keys=[home_team_id])
+    away_team = relationship("Team", foreign_keys=[away_team_id])
+    league = relationship("League", back_populates="fixtures")
+    venue = relationship("Venue", back_populates="fixtures")
+
+

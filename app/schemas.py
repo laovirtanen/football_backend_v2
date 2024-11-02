@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel
 from typing import Optional, Any
-from datetime import date
+from datetime import date, datetime
 
 class LeagueBase(BaseModel):
     league_id: int
@@ -132,6 +132,45 @@ class PlayerStatisticsBase(BaseModel):
     penalty_scored: Optional[int]
     penalty_missed: Optional[int]
     penalty_saved: Optional[int]
+
+    class Config:
+        from_attributes = True
+
+
+class VenueBase(BaseModel):
+    id: Optional[int] = None
+    name: Optional[str]
+    city: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+class FixtureBase(BaseModel):
+    fixture_id: int
+    referee: Optional[str]
+    timezone: str
+    date: datetime
+    timestamp: int
+    venue_id: Optional[int]
+    status_long: str
+    status_short: str
+    status_elapsed: Optional[int]
+    status_extra: Optional[str]
+    league_id: int
+    season_year: int
+    round: Optional[str]
+    home_team_id: int
+    away_team_id: int
+    goals_home: Optional[int]
+    goals_away: Optional[int]
+    score_halftime_home: Optional[int]
+    score_halftime_away: Optional[int]
+    score_fulltime_home: Optional[int]
+    score_fulltime_away: Optional[int]
+    score_extratime_home: Optional[int]
+    score_extratime_away: Optional[int]
+    score_penalty_home: Optional[int]
+    score_penalty_away: Optional[int]
 
     class Config:
         from_attributes = True
