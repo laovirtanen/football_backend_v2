@@ -197,5 +197,87 @@ class Fixture(Base):
     away_team = relationship("Team", foreign_keys=[away_team_id])
     league = relationship("League", back_populates="fixtures")
     venue = relationship("Venue", back_populates="fixtures")
+    odds = relationship("FixtureOdds", back_populates="fixture", uselist=False)
+    prediction = relationship("Prediction", uselist=False, back_populates="fixture")
+
+class Bookmaker(Base):
+    __tablename__ = "bookmakers"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False, unique=True)
+
+    fixture_bookmakers = relationship("FixtureBookmaker", back_populates="bookmaker")
 
 
+class BetType(Base):
+    __tablename__ = "bet_types"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False, unique=True)
+
+    bets = relationship("Bet", back_populates="bet_type")
+
+
+class FixtureOdds(Base):
+    __tablename__ = "fixture_odds"
+
+    id = Column(Integer, primary_key=True)
+    fixture_id = Column(Integer, ForeignKey("fixtures.fixture_id"), nullable=False)
+    update_time = Column(DateTime(timezone=True), nullable=False)
+
+    fixture = relationship("Fixture", back_populates="odds")
+    fixture_bookmakers = relationship("FixtureBookmaker", back_populates="fixture_odds")
+
+
+class FixtureBookmaker(Base):
+    __tablename__ = "fixture_bookmakers"
+
+    id = Column(Integer, primary_key=True)
+    fixture_odds_id = Column(Integer, ForeignKey("fixture_odds.id"), nullable=False)
+    bookmaker_id = Column(Integer, ForeignKey("bookmakers.id"), nullable=False)
+
+    fixture_odds = relationship("FixtureOdds", back_populates="fixture_bookmakers")
+    bookmaker = relationship("Bookmaker", back_populates="fixture_bookmakers")
+    bets = relationship("Bet", back_populates="fixture_bookmaker")
+
+
+class Bet(Base):
+    __tablename__ = "bets"
+
+    id = Column(Integer, primary_key=True)
+    fixture_bookmaker_id = Column(Integer, ForeignKey("fixture_bookmakers.id"), nullable=False)
+    bet_type_id = Column(Integer, ForeignKey("bet_types.id"), nullable=False)
+
+    fixture_bookmaker = relationship("FixtureBookmaker", back_populates="bets")
+    bet_type = relationship("BetType", back_populates="bets")
+    odd_values = relationship("OddValue", back_populates="bet")
+
+
+class OddValue(Base):
+    __tablename__ = "odd_values"
+
+    id = Column(Integer, primary_key=True)
+    bet_id = Column(Integer, ForeignKey("bets.id"), nullable=False)
+    value = Column(String, nullable=False)
+    odd = Column(String, nullable=False)
+
+    bet = relationship("Bet", back_populates="odd_values")
+
+
+class Prediction(Base):
+    __tablename__ = "predictions"
+    id = Column(Integer, primary_key=True, index=True)
+    fixture_id = Column(Integer, ForeignKey("fixtures.fixture_id"), unique=True)
+    winner_team_id = Column(Integer, ForeignKey("teams.team_id"))
+    win_or_draw = Column(Boolean)
+    under_over = Column(String)
+    goals_home = Column(String)
+    goals_away = Column(String)
+    advice = Column(String)
+    percent_home = Column(String)
+    percent_draw = Column(String)
+    percent_away = Column(String)
+    comparison = Column(JSON)
+
+    fixture = relationship("Fixture", back_populates="prediction")
+    winner_team = relationship("Team")

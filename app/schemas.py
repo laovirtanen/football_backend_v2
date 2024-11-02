@@ -1,8 +1,54 @@
-# app/schemas.py
-
+from __future__ import annotations
 from pydantic import BaseModel
-from typing import Optional, Any
+from typing import Dict, Optional, Any, List
 from datetime import date, datetime
+
+class BookmakerSchema(BaseModel):
+    id: int
+    name: str
+
+    class Config:
+        from_attributes = True
+
+class BetTypeSchema(BaseModel):
+    id: int
+    name: str
+
+    class Config:
+        from_attributes = True
+
+class OddValueSchema(BaseModel):
+    id: int
+    value: str
+    odd: str
+
+    class Config:
+        from_attributes = True
+
+class BetSchema(BaseModel):
+    id: int
+    bet_type: BetTypeSchema
+    odd_values: List[OddValueSchema]
+
+    class Config:
+        from_attributes = True
+
+class FixtureBookmakerSchema(BaseModel):
+    id: int
+    bookmaker: BookmakerSchema
+    bets: List[BetSchema]
+
+    class Config:
+        from_attributes = True
+
+class FixtureOddsSchema(BaseModel):
+    id: int
+    update_time: datetime
+    fixture_id: int
+    fixture_bookmakers: List[FixtureBookmakerSchema]
+
+    class Config:
+        from_attributes = True
 
 class LeagueBase(BaseModel):
     league_id: int
@@ -14,7 +60,7 @@ class LeagueBase(BaseModel):
     country_flag: Optional[str]
 
     class Config:
-        from_attributes = True  # Enables ORM mode
+        from_attributes = True
 
 class SeasonBase(BaseModel):
     id: int
@@ -23,11 +69,10 @@ class SeasonBase(BaseModel):
     start: Optional[date]
     end: Optional[date]
     current: bool
-    coverage: Any
+    coverage: Optional[Any] = None
 
     class Config:
         from_attributes = True
-
 
 class TeamBase(BaseModel):
     team_id: int
@@ -38,8 +83,7 @@ class TeamBase(BaseModel):
     national: Optional[bool]
     logo: Optional[str]
     league_id: int
-    season_year: int  # New field
-
+    season_year: int
 
     class Config:
         from_attributes = True
@@ -59,13 +103,10 @@ class PlayerBase(BaseModel):
     injured: Optional[bool]
     photo: Optional[str]
     team_id: int
-    season_year: int  # New field
-
+    season_year: int
 
     class Config:
         from_attributes = True
-
-
 
 class PlayerStatisticsBase(BaseModel):
     id: int
@@ -136,7 +177,6 @@ class PlayerStatisticsBase(BaseModel):
     class Config:
         from_attributes = True
 
-
 class VenueBase(BaseModel):
     id: Optional[int] = None
     name: Optional[str]
@@ -171,6 +211,21 @@ class FixtureBase(BaseModel):
     score_extratime_away: Optional[int]
     score_penalty_home: Optional[int]
     score_penalty_away: Optional[int]
+    odds: Optional[FixtureOddsSchema] = None
 
     class Config:
         from_attributes = True
+
+
+class PredictionBase(BaseModel):
+    fixture_id: int
+    winner_team_id: Optional[int] = None
+    win_or_draw: Optional[bool] = None
+    under_over: Optional[str] = None
+    goals_home: Optional[str] = None
+    goals_away: Optional[str] = None
+    advice: Optional[str] = None
+    percent_home: Optional[str] = None
+    percent_draw: Optional[str] = None
+    percent_away: Optional[str] = None
+    comparison: Optional[Dict[str, Any]] = None

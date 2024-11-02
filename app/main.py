@@ -2,7 +2,7 @@
 
 from fastapi import FastAPI
 from .database import engine, Base
-from .routers.ingestion import ingest_leagues, ingest_teams, ingest_players, ingest_player_statistics, ingest_fixtures
+from .routers.ingestion import ingest_leagues, ingest_teams, ingest_players, ingest_player_statistics, ingest_fixtures, ingest_odds, ingest_predictions
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
@@ -22,3 +22,5 @@ app.include_router(ingest_teams.router)
 app.include_router(ingest_players.router)
 app.include_router(ingest_player_statistics.router)
 app.include_router(ingest_fixtures.router)
+app.include_router(ingest_odds.router)
+app.include_router(ingest_predictions.router)
