@@ -229,3 +229,63 @@ class PredictionBase(BaseModel):
     percent_draw: Optional[str] = None
     percent_away: Optional[str] = None
     comparison: Optional[Dict[str, Any]] = None
+
+    class Config:
+        from_attributes = True
+
+class LeagueWithTeams(LeagueBase):
+    teams: List[TeamBase] = []
+
+    class Config:
+        from_attributes = True
+
+
+
+class FixtureBaseDetailed(BaseModel):
+    fixture_id: int
+    referee: Optional[str]
+    timezone: str
+    date: datetime
+    timestamp: int
+    venue: Optional[VenueBase]
+    status_long: str
+    status_short: str
+    status_elapsed: Optional[int]
+    status_extra: Optional[str]
+    league: LeagueBase
+    season_year: int
+    round: Optional[str]
+    home_team: TeamBase
+    away_team: TeamBase
+    goals_home: Optional[int]
+    goals_away: Optional[int]
+    score_halftime_home: Optional[int]
+    score_halftime_away: Optional[int]
+    score_fulltime_home: Optional[int]
+    score_fulltime_away: Optional[int]
+    score_extratime_home: Optional[int]
+    score_extratime_away: Optional[int]
+    score_penalty_home: Optional[int]
+    score_penalty_away: Optional[int]
+    odds: Optional[FixtureOddsSchema]
+    prediction: Optional[PredictionBase]
+
+    class Config:
+        from_attributes = True
+
+class PredictionSchema(BaseModel):
+    id: int
+    fixture_id: int
+    winner_team_id: Optional[int]
+    win_or_draw: Optional[bool]
+    under_over: Optional[str]
+    goals_home: Optional[str]
+    goals_away: Optional[str]
+    advice: Optional[str]
+    percent_home: Optional[str]
+    percent_draw: Optional[str]
+    percent_away: Optional[str]
+    comparison: Optional[Dict[str, Any]]
+
+    class Config:
+        from_attributes = True
