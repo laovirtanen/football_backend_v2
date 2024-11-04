@@ -10,7 +10,9 @@ from .routers.retrieval import (
     bookmakers,
     odds,
     predictions,
-    players
+    players,
+    standings,
+    head_to_head
 )
 from contextlib import asynccontextmanager
 
@@ -44,3 +46,5 @@ app.include_router(bookmakers.router)
 app.include_router(odds.router)
 app.include_router(predictions.router)
 app.include_router(players.router)
+app.include_router(standings.router)
+app.include_router(head_to_head.router)

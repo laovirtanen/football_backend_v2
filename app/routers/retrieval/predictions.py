@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import func, case
 from sqlalchemy.orm import selectinload
 from typing import List, Optional
 
@@ -40,7 +41,7 @@ async def get_predictions(
         
         result = await db.execute(query)
         predictions = result.scalars().all()
-        return predictions
+        return [schemas.PredictionSchema.model_validate(prediction) for prediction in predictions]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -61,6 +62,63 @@ async def get_prediction_by_id(
         prediction = result.scalar_one_or_none()
         if not prediction:
             raise HTTPException(status_code=404, detail="Prediction not found")
-        return prediction
+        return schemas.PredictionSchema.model_validate(prediction)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/stats/accuracy", response_model=schemas.PredictionAccuracy)
+async def get_prediction_accuracy(
+    league_id: Optional[int] = Query(None, description="Filter by league ID"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Calculate the accuracy of predictions.
+    """
+    try:
+        query = (
+            select(
+                func.count(models.Prediction.id).label('total_predictions'),
+                func.sum(
+                    case(
+                        (
+                            (models.Prediction.winner_team_id == models.Fixture.home_team_id) &
+                            (models.Fixture.goals_home > models.Fixture.goals_away),
+                            1
+                        ),
+                        (
+                            (models.Prediction.winner_team_id == models.Fixture.away_team_id) &
+                            (models.Fixture.goals_away > models.Fixture.goals_home),
+                            1
+                        ),
+                        (
+                            (models.Prediction.winner_team_id == None) &
+                            (models.Fixture.goals_home == models.Fixture.goals_away),
+                            1
+                        ),
+                        else_=0
+                    )
+                ).label('correct_predictions')
+            )
+            .select_from(models.Prediction)
+            .join(models.Fixture, models.Prediction.fixture_id == models.Fixture.fixture_id)
+            .where(models.Fixture.status_short == 'FT')
+        )
+
+        if league_id:
+            query = query.where(models.Fixture.league_id == league_id)
+
+        result = await db.execute(query)
+        stats = result.first()
+
+        total_predictions = stats.total_predictions or 0
+        correct_predictions = stats.correct_predictions or 0
+        accuracy = (correct_predictions / total_predictions) * 100 if total_predictions > 0 else 0
+
+        return schemas.PredictionAccuracy(
+            total_predictions=total_predictions,
+            correct_predictions=correct_predictions,
+            accuracy=accuracy
+        )
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

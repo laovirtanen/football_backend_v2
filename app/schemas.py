@@ -1,5 +1,5 @@
 from __future__ import annotations
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Dict, Optional, Any, List
 from datetime import date, datetime
 
@@ -7,39 +7,38 @@ class BookmakerSchema(BaseModel):
     id: int
     name: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
 
 class BetTypeSchema(BaseModel):
     id: int
     name: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
 
 class OddValueSchema(BaseModel):
     id: int
     value: str
     odd: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
 
 class BetSchema(BaseModel):
     id: int
     bet_type: BetTypeSchema
     odd_values: List[OddValueSchema]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
 
 class FixtureBookmakerSchema(BaseModel):
     id: int
     bookmaker: BookmakerSchema
     bets: List[BetSchema]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class FixtureOddsSchema(BaseModel):
     id: int
@@ -47,8 +46,7 @@ class FixtureOddsSchema(BaseModel):
     fixture_id: int
     fixture_bookmakers: List[FixtureBookmakerSchema]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class LeagueBase(BaseModel):
     league_id: int
@@ -59,8 +57,8 @@ class LeagueBase(BaseModel):
     country_code: Optional[str]
     country_flag: Optional[str]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
 
 class SeasonBase(BaseModel):
     id: int
@@ -71,8 +69,7 @@ class SeasonBase(BaseModel):
     current: bool
     coverage: Optional[Any] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class TeamBase(BaseModel):
     team_id: int
@@ -85,8 +82,8 @@ class TeamBase(BaseModel):
     league_id: int
     season_year: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
 
 class PlayerBase(BaseModel):
     player_id: int
@@ -105,8 +102,8 @@ class PlayerBase(BaseModel):
     team_id: int
     season_year: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
 
 class PlayerStatisticsBase(BaseModel):
     id: int
@@ -174,16 +171,16 @@ class PlayerStatisticsBase(BaseModel):
     penalty_missed: Optional[int]
     penalty_saved: Optional[int]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
 
 class VenueBase(BaseModel):
     id: Optional[int] = None
     name: Optional[str]
     city: Optional[str]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
 
 class FixtureBase(BaseModel):
     fixture_id: int
@@ -213,8 +210,8 @@ class FixtureBase(BaseModel):
     score_penalty_away: Optional[int]
     odds: Optional[FixtureOddsSchema] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
 
 
 class PredictionBase(BaseModel):
@@ -230,14 +227,14 @@ class PredictionBase(BaseModel):
     percent_away: Optional[str] = None
     comparison: Optional[Dict[str, Any]] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
 
 class LeagueWithTeams(LeagueBase):
     teams: List[TeamBase] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
 
 
 
@@ -270,8 +267,8 @@ class FixtureBaseDetailed(BaseModel):
     odds: Optional[FixtureOddsSchema]
     prediction: Optional[PredictionBase]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
 
 class PredictionSchema(BaseModel):
     id: int
@@ -287,5 +284,55 @@ class PredictionSchema(BaseModel):
     percent_away: Optional[str]
     comparison: Optional[Dict[str, Any]]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+
+
+
+class TeamStanding(BaseModel):
+    rank: int
+    team: TeamBase
+    matches_played: int
+    points: int
+    wins: int
+    draws: int
+    losses: int
+    goals_for: int
+    goals_against: int
+    goal_difference: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+
+
+class TeamStatistics(BaseModel):
+    team: TeamBase
+    matches_played: int
+    wins: int
+    draws: int
+    losses: int
+    goals_for: int
+    goals_against: int
+    goal_difference: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+
+
+class PlayerRanking(BaseModel):
+    rank: int
+    player: PlayerBase
+    stat_value: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+
+class PredictionAccuracy(BaseModel):
+    total_predictions: int
+    correct_predictions: int
+    accuracy: float
+
+    model_config = ConfigDict(from_attributes=True)
