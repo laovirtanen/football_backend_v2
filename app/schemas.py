@@ -101,6 +101,7 @@ class PlayerBase(BaseModel):
     photo: Optional[str]
     team_id: int
     season_year: int
+    team: Optional[TeamBase]
 
     model_config = ConfigDict(from_attributes=True)
 

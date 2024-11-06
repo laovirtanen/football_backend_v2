@@ -58,18 +58,16 @@ async def get_player_by_id(
     """
     try:
         query = select(models.Player).where(models.Player.player_id == player_id).options(
-            selectinload(models.Player.team),
-            selectinload(models.Player.statistics)
+            selectinload(models.Player.team)  # Ensure team is eagerly loaded
         )
         result = await db.execute(query)
         player = result.scalar_one_or_none()
         if not player:
             raise HTTPException(status_code=404, detail="Player not found")
-        return schemas.PlayerBase.model_validate(player)
+        return schemas.PlayerBase.from_orm(player)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# app/routers/retrieval/players.py
 
 @router.get("/stats/rankings", response_model=List[schemas.PlayerRanking])
 async def get_player_rankings(
@@ -79,9 +77,6 @@ async def get_player_rankings(
     limit: int = Query(10, ge=1, le=100),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Retrieve player rankings based on a specific statistic.
-    """
     try:
         # Map stat_type to database column
         stat_column_mapping = {
@@ -98,21 +93,33 @@ async def get_player_rankings(
 
         stat_value = func.sum(stat_column).label('stat_value')
 
+        # Subquery to aggregate player statistics
+        subquery = (
+            select(
+                models.PlayerStatistics.player_id,
+                stat_value
+            )
+            .where(
+                models.PlayerStatistics.league_id == league_id,
+                models.PlayerStatistics.season_year == season_year,
+                stat_column.is_not(None),            # Exclude NULL values
+                stat_column > 0                      # Exclude zero values
+            )
+            .group_by(models.PlayerStatistics.player_id)
+            .subquery()
+        )
+
+        # Main query to get player details and stat_value
         query = (
             select(
                 models.Player,
-                stat_value
+                subquery.c.stat_value
             )
-            .join(models.PlayerStatistics, models.Player.player_id == models.PlayerStatistics.player_id)
-            .group_by(models.Player.player_id)
-            .order_by(stat_value.desc())
+            .options(selectinload(models.Player.team))  # Add this line
+            .join(subquery, models.Player.player_id == subquery.c.player_id)
+            .order_by(subquery.c.stat_value.desc())
             .limit(limit)
         )
-
-        if league_id:
-            query = query.where(models.PlayerStatistics.league_id == league_id)
-        if season_year:
-            query = query.where(models.PlayerStatistics.season_year == season_year)
 
         result = await db.execute(query)
         rankings = result.fetchall()
