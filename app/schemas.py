@@ -195,6 +195,8 @@ class FixtureBase(BaseModel):
     status_elapsed: Optional[int]
     status_extra: Optional[str]
     league_id: int
+    home_team: 'TeamBase'  # Include home_team
+    away_team: 'TeamBase'  # Include away_team
     season_year: int
     round: Optional[str]
     home_team_id: int
@@ -337,3 +339,6 @@ class PredictionAccuracy(BaseModel):
     accuracy: float
 
     model_config = ConfigDict(from_attributes=True)
+
+
+FixtureBaseDetailed.model_rebuild()
