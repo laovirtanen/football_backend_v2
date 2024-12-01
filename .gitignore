@@ -111,3 +111,5 @@ Thumbs.db
 # Ignore all logs and databases
 *.log
 *.sqlite3
+
+alembic.ini

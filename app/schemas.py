@@ -318,6 +318,11 @@ class TeamStatistics(BaseModel):
     goals_for: int
     goals_against: int
     goal_difference: int
+    average_possession: Optional[float] = None
+    clean_sheets: int
+    average_shots_on_target: Optional[float] = None
+    average_tackles: Optional[float] = None
+    average_key_passes: Optional[float] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -342,3 +347,58 @@ class PredictionAccuracy(BaseModel):
 
 
 FixtureBaseDetailed.model_rebuild()
+
+
+class FixtureH2HStats(BaseModel):
+    total_matches: int
+    home_team_wins: int
+    away_team_wins: int
+    draws: int
+    recent_matches: List[Dict[str, Any]]
+
+class TeamRecentForm(BaseModel):
+    fixture_id: int
+    date: datetime
+    opponent: str
+    opponent_logo: Optional[str] = None
+    opponent_team_id: int
+    home_or_away: str
+    goals_for: int
+    goals_against: int
+    outcome: str  # 'W', 'D', 'L'
+
+    model_config = ConfigDict(from_attributes=True)
+
+class TeamStatistics(BaseModel):
+    matches_played: int
+    wins: int
+    draws: int
+    losses: int
+    goals_for: int
+    goals_against: int
+    goal_difference: int
+    clean_sheets: int
+    average_shots_on_target: Optional[float]
+    average_tackles: Optional[float]
+    average_passes_accuracy: Optional[float]
+
+    model_config = ConfigDict(from_attributes=True)
+
+class TopPlayer(BaseModel):
+    player_id: int
+    name: str
+    position: str
+    goals: Optional[int]
+    photo: Optional[str]
+
+class FixtureDetailedResponse(FixtureBaseDetailed):
+    h2h_stats: Optional[FixtureH2HStats] = None
+    home_recent_form: Optional[List[TeamRecentForm]] = None
+    away_recent_form: Optional[List[TeamRecentForm]] = None
+    home_team_stats: Optional[TeamStatistics] = None
+    away_team_stats: Optional[TeamStatistics] = None
+    home_top_players: Optional[List[TopPlayer]] = None
+    away_top_players: Optional[List[TopPlayer]] = None
+
+    model_config = ConfigDict(from_attributes=True)
+

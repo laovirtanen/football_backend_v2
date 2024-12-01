@@ -3,7 +3,7 @@
 from fastapi import FastAPI
 from .database import engine, Base
 from fastapi.middleware.cors import CORSMiddleware
-from .routers.ingestion import ingest_leagues, ingest_teams, ingest_players, ingest_player_statistics, ingest_fixtures, ingest_odds, ingest_predictions
+from .routers.ingestion import ingest_leagues, ingest_teams, ingest_players, ingest_player_statistics, ingest_fixtures, ingest_odds, ingest_predictions, ingest_fixtures_data
 from .routers.retrieval import (
     leagues,
     teams,
@@ -21,11 +21,12 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup code: create tables
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    # async with engine.begin() as conn:
+    #     await conn.run_sync(Base.metadata.create_all)
     yield
     # Shutdown code: dispose engine
     await engine.dispose()
+
 
 app = FastAPI(lifespan=lifespan)
 
@@ -46,6 +47,7 @@ app.include_router(ingest_player_statistics.router)
 app.include_router(ingest_fixtures.router)
 app.include_router(ingest_odds.router)
 app.include_router(ingest_predictions.router)
+app.include_router(ingest_fixtures_data.router)
 
 
 

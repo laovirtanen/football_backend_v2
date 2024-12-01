@@ -1,8 +1,10 @@
+# app/routers/ingestion/predictions.py
+
 import logging
 import os
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 import httpx
 
 from app.database import get_db
@@ -33,17 +35,15 @@ async def fetch_and_store_predictions(db: AsyncSession = Depends(get_db)):
         }
 
         async with httpx.AsyncClient() as client:
-            # Fetch all fixtures without predictions
+            # Fetch all fixtures (you can modify the date range as needed)
             fixtures_result = await db.execute(
-                select(models.Fixture.fixture_id).outerjoin(models.Prediction).filter(
-                    models.Prediction.id.is_(None)
-                )
+                select(models.Fixture.fixture_id)
             )
             fixture_ids = [fixture_id for (fixture_id,) in fixtures_result.fetchall()]
 
             if not fixture_ids:
-                logger.info("No fixtures without predictions found.")
-                return {"message": "No fixtures without predictions found."}
+                logger.info("No fixtures found.")
+                return {"message": "No fixtures found."}
 
             predictions_processed = 0
 
@@ -83,24 +83,39 @@ async def fetch_and_store_predictions(db: AsyncSession = Depends(get_db)):
                 percent = predictions.get("percent", {})
                 comparison = prediction_data.get("comparison", {})
 
-                # Store prediction
-                prediction = models.Prediction(
-                    fixture_id=fixture_id,
-                    winner_team_id=winner.get("id"),
-                    win_or_draw=win_or_draw,
-                    under_over=under_over,
-                    goals_home=goals.get("home"),
-                    goals_away=goals.get("away"),
-                    advice=advice,
-                    percent_home=percent.get("home"),
-                    percent_draw=percent.get("draw"),
-                    percent_away=percent.get("away"),
-                    comparison=comparison
-                )
-                db.add(prediction)
-                await db.commit()
-                await db.refresh(prediction)
+                # Check if prediction already exists
+                existing_prediction = await db.get(models.Prediction, fixture_id)
 
+                if existing_prediction:
+                    # Update existing prediction
+                    existing_prediction.winner_team_id = winner.get("id")
+                    existing_prediction.win_or_draw = win_or_draw
+                    existing_prediction.under_over = under_over
+                    existing_prediction.goals_home = goals.get("home")
+                    existing_prediction.goals_away = goals.get("away")
+                    existing_prediction.advice = advice
+                    existing_prediction.percent_home = percent.get("home")
+                    existing_prediction.percent_draw = percent.get("draw")
+                    existing_prediction.percent_away = percent.get("away")
+                    existing_prediction.comparison = comparison
+                else:
+                    # Store new prediction
+                    prediction = models.Prediction(
+                        fixture_id=fixture_id,
+                        winner_team_id=winner.get("id"),
+                        win_or_draw=win_or_draw,
+                        under_over=under_over,
+                        goals_home=goals.get("home"),
+                        goals_away=goals.get("away"),
+                        advice=advice,
+                        percent_home=percent.get("home"),
+                        percent_draw=percent.get("draw"),
+                        percent_away=percent.get("away"),
+                        comparison=comparison
+                    )
+                    db.add(prediction)
+
+                await db.commit()
                 predictions_processed += 1
 
             logger.info(f"Finished fetching and storing predictions. Total predictions processed: {predictions_processed}")

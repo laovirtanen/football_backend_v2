@@ -1,9 +1,10 @@
 # app/routers/retrieval/teams.py
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import case, func
+from sqlalchemy import func, case, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
 from typing import List, Optional
 
 from app import models, schemas
@@ -47,7 +48,9 @@ async def get_team_by_id(
     Retrieve a specific team by its ID.
     """
     try:
-        result = await db.execute(select(models.Team).where(models.Team.team_id == team_id))
+        result = await db.execute(
+            select(models.Team).where(models.Team.team_id == team_id)
+        )
         team = result.scalar_one_or_none()
         if not team:
             raise HTTPException(status_code=404, detail="Team not found")
@@ -65,99 +68,104 @@ async def get_team_statistics(
     Retrieve aggregated statistics for a specific team.
     """
     try:
-        # Calculate team statistics
-        stats_query = (
-            select(
-                func.count().filter(models.Fixture.status_short == 'FT').label('matches_played'),
-                func.sum(
-                    case(
-                        (
-                            (models.Fixture.home_team_id == team_id) & (models.Fixture.goals_home > models.Fixture.goals_away),
-                            1
-                        ),
-                        (
-                            (models.Fixture.away_team_id == team_id) & (models.Fixture.goals_away > models.Fixture.goals_home),
-                            1
-                        ),
-                        else_=0
-                    )
-                ).label('wins'),
-                func.sum(
-                    case(
-                        (
-                            (models.Fixture.goals_home == models.Fixture.goals_away) &
-                            ((models.Fixture.home_team_id == team_id) | (models.Fixture.away_team_id == team_id)),
-                            1
-                        ),
-                        else_=0
-                    )
-                ).label('draws'),
-                func.sum(
-                    case(
-                        (
-                            (models.Fixture.home_team_id == team_id) & (models.Fixture.goals_home < models.Fixture.goals_away),
-                            1
-                        ),
-                        (
-                            (models.Fixture.away_team_id == team_id) & (models.Fixture.goals_away < models.Fixture.goals_home),
-                            1
-                        ),
-                        else_=0
-                    )
-                ).label('losses'),
-                func.sum(
-                    case(
-                        (
-                            models.Fixture.home_team_id == team_id,
-                            models.Fixture.goals_home
-                        ),
-                        (
-                            models.Fixture.away_team_id == team_id,
-                            models.Fixture.goals_away
-                        ),
-                        else_=0
-                    )
-                ).label('goals_for'),
-                func.sum(
-                    case(
-                        (
-                            models.Fixture.home_team_id == team_id,
-                            models.Fixture.goals_away
-                        ),
-                        (
-                            models.Fixture.away_team_id == team_id,
-                            models.Fixture.goals_home
-                        ),
-                        else_=0
-                    )
-                ).label('goals_against')
-            )
-            .select_from(models.Fixture)
-            .where(
-                ((models.Fixture.home_team_id == team_id) | (models.Fixture.away_team_id == team_id)),
-                models.Fixture.season_year == season_year,
-                models.Fixture.status_short == 'FT'
-            )
+        # Fetch team
+        team_result = await db.execute(
+            select(models.Team).where(models.Team.team_id == team_id)
         )
-
-        result = await db.execute(stats_query)
-        stats = result.first()
-
-        team_result = await db.execute(select(models.Team).where(models.Team.team_id == team_id))
         team = team_result.scalar_one_or_none()
-
         if not team:
             raise HTTPException(status_code=404, detail="Team not found")
 
+        # Fetch fixtures
+        fixtures_query = select(models.Fixture).where(
+            ((models.Fixture.home_team_id == team_id) | (models.Fixture.away_team_id == team_id)),
+            models.Fixture.season_year == season_year,
+            models.Fixture.status_short == 'FT'
+        )
+        fixtures_result = await db.execute(fixtures_query)
+        fixtures = fixtures_result.scalars().all()
+
+        if not fixtures:
+            # Return zeroed statistics if no fixtures are found
+            return schemas.TeamStatistics(
+                team=schemas.TeamBase.model_validate(team),
+                matches_played=0,
+                wins=0,
+                draws=0,
+                losses=0,
+                goals_for=0,
+                goals_against=0,
+                goal_difference=0,
+                clean_sheets=0,
+                average_shots_on_target=None,
+                average_tackles=None,
+                average_passes_accuracy=None
+            )
+
+        # Initialize stats
+        matches_played = len(fixtures)
+        wins = draws = losses = goals_for = goals_against = clean_sheets = 0
+        total_shots_on_target = total_tackles = 0
+        passes_accuracies = []
+
+        # Fetch player statistics
+        player_stats_query = select(models.PlayerStatistics).where(
+            models.PlayerStatistics.team_id == team_id,
+            models.PlayerStatistics.season_year == season_year
+        )
+        player_stats_result = await db.execute(player_stats_query)
+        player_stats = player_stats_result.scalars().all()
+
+        if player_stats:
+            total_shots_on_target = sum(ps.shots_on or 0 for ps in player_stats)
+            total_tackles = sum(ps.tackles_total or 0 for ps in player_stats)
+            passes_accuracies = [ps.passes_accuracy for ps in player_stats if ps.passes_accuracy is not None]
+        else:
+            total_shots_on_target = total_tackles = 0
+            passes_accuracies = []
+
+        # Calculate statistics
+        for fixture in fixtures:
+            if fixture.home_team_id == team_id:
+                gf = fixture.goals_home or 0
+                ga = fixture.goals_away or 0
+                is_clean_sheet = ga == 0
+            else:
+                gf = fixture.goals_away or 0
+                ga = fixture.goals_home or 0
+                is_clean_sheet = ga == 0
+
+            goals_for += gf
+            goals_against += ga
+
+            if gf > ga:
+                wins += 1
+            elif gf < ga:
+                losses += 1
+            else:
+                draws += 1
+
+            if is_clean_sheet:
+                clean_sheets += 1
+
+        average_shots_on_target = (total_shots_on_target / matches_played) if matches_played > 0 else None
+        average_tackles = (total_tackles / matches_played) if matches_played > 0 else None
+        average_passes_accuracy = (sum(passes_accuracies) / len(passes_accuracies)) if passes_accuracies else None
+        goal_difference = goals_for - goals_against
+
         return schemas.TeamStatistics(
             team=schemas.TeamBase.model_validate(team),
-            matches_played=stats.matches_played or 0,
-            wins=stats.wins or 0,
-            draws=stats.draws or 0,
-            losses=stats.losses or 0,
-            goals_for=stats.goals_for or 0,
-            goals_against=stats.goals_against or 0,
-            goal_difference=(stats.goals_for or 0) - (stats.goals_against or 0)
+            matches_played=matches_played,
+            wins=wins,
+            draws=draws,
+            losses=losses,
+            goals_for=goals_for,
+            goals_against=goals_against,
+            goal_difference=goal_difference,
+            clean_sheets=clean_sheets,
+            average_shots_on_target=average_shots_on_target,
+            average_tackles=average_tackles,
+            average_passes_accuracy=average_passes_accuracy
         )
 
     except Exception as e:

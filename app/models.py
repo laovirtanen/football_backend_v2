@@ -171,6 +171,7 @@ class Fixture(Base):
     status_short = Column(String, nullable=False)
     status_elapsed = Column(Integer, nullable=True)
     status_extra = Column(String, nullable=True)
+    is_final = Column(Boolean, default=False)
 
     league_id = Column(Integer, ForeignKey("leagues.league_id"), nullable=False)
 
