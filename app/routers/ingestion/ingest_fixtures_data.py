@@ -1,11 +1,12 @@
-# app/routers/ingestion/fixtures_data.py
+# app/routers/ingestion/ingest_fixtures_data.py
 
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
+from sqlalchemy.exc import IntegrityError
 import httpx
 
 from app.database import get_db
@@ -18,8 +19,10 @@ router = APIRouter(
 
 API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY")
 
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 @router.post("/fixtures_data/", response_model=dict)
 async def fetch_and_store_fixtures_data(db: AsyncSession = Depends(get_db)):
@@ -36,15 +39,19 @@ async def fetch_and_store_fixtures_data(db: AsyncSession = Depends(get_db)):
 
         async with httpx.AsyncClient() as client:
             # Fetch fixtures within a certain date range (modify as needed)
-            start_date = datetime.utcnow()
-            end_date = start_date + timedelta(days=14)
+            start_date = datetime(2024, 8, 14, tzinfo=timezone.utc)
+            end_date = datetime(2025, 5, 26, tzinfo=timezone.utc)
+            logger.debug(f"Fetching fixtures between {start_date} and {end_date}")
+
+
             fixtures_result = await db.execute(
-                select(models.Fixture.fixture_id).filter(
+                select(models.Fixture.fixture_id, models.Fixture.status_short).filter(
                     models.Fixture.date >= start_date,
                     models.Fixture.date <= end_date
                 )
             )
-            fixture_ids = [fixture_id for (fixture_id,) in fixtures_result.fetchall()]
+            fixture_rows = fixtures_result.fetchall()
+            fixture_ids = [fixture_id for (fixture_id, _) in fixture_rows]
 
             if not fixture_ids:
                 logger.info("No fixtures found within the specified date range.")
@@ -52,7 +59,7 @@ async def fetch_and_store_fixtures_data(db: AsyncSession = Depends(get_db)):
 
             data_processed = 0
 
-            for fixture_id in fixture_ids:
+            for fixture_id, status_short in fixture_rows:
                 logger.info(f"Processing fixture ID: {fixture_id}")
 
                 # Fetch and store predictions
@@ -60,6 +67,14 @@ async def fetch_and_store_fixtures_data(db: AsyncSession = Depends(get_db)):
 
                 # Fetch and store odds
                 await fetch_and_store_odds_for_fixture(fixture_id, client, db, headers)
+
+                # Check if the match is played
+                if status_short in ['FT', 'AET', 'PEN', 'AWD', 'WO']:
+                    # Fetch and store match statistics
+                    await fetch_and_store_match_statistics(fixture_id, client, db, headers)
+
+                    # Fetch and store match events
+                    await fetch_and_store_match_events(fixture_id, client, db, headers)
 
                 data_processed += 1
 
@@ -70,23 +85,28 @@ async def fetch_and_store_fixtures_data(db: AsyncSession = Depends(get_db)):
         logger.error(f"An error occurred during fixtures data ingestion: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+
 async def fetch_and_store_prediction_for_fixture(fixture_id, client, db, headers):
     try:
-        params = {
-            'fixture': fixture_id
-        }
+        params = {'fixture': fixture_id}
 
+        logger.debug(f"Fetching prediction for fixture ID: {fixture_id}")
         response = await client.get(
             "https://v3.football.api-sports.io/predictions",
             headers=headers,
             params=params
         )
 
+        logger.debug(f"Response status code: {response.status_code}")
+        logger.debug(f"Response headers: {response.headers}")
+
         if response.status_code != 200:
             logger.error(f"Failed to fetch prediction for fixture {fixture_id}: {response.text}")
             return
 
         data = response.json()
+        logger.debug(f"API response for fixture {fixture_id}: {data}")
+
         predictions_response = data.get("response", [])
 
         if not predictions_response:
@@ -105,10 +125,14 @@ async def fetch_and_store_prediction_for_fixture(fixture_id, client, db, headers
         percent = predictions.get("percent", {})
         comparison = prediction_data.get("comparison", {})
 
-        # Check if prediction already exists
-        existing_prediction = await db.get(models.Prediction, fixture_id)
+        # Check if prediction already exists based on fixture_id
+        existing_prediction_result = await db.execute(
+            select(models.Prediction).where(models.Prediction.fixture_id == fixture_id)
+        )
+        existing_prediction = existing_prediction_result.scalars().first()
 
         if existing_prediction:
+            logger.debug(f"Updating existing prediction for fixture {fixture_id}")
             # Update existing prediction
             existing_prediction.winner_team_id = winner.get("id")
             existing_prediction.win_or_draw = win_or_draw
@@ -120,8 +144,8 @@ async def fetch_and_store_prediction_for_fixture(fixture_id, client, db, headers
             existing_prediction.percent_draw = percent.get("draw")
             existing_prediction.percent_away = percent.get("away")
             existing_prediction.comparison = comparison
-            # No need to add existing_prediction to the session again
         else:
+            logger.debug(f"Inserting new prediction for fixture {fixture_id}")
             # Store new prediction
             prediction = models.Prediction(
                 fixture_id=fixture_id,
@@ -139,35 +163,44 @@ async def fetch_and_store_prediction_for_fixture(fixture_id, client, db, headers
             db.add(prediction)
 
         await db.commit()
+        logger.info(f"Stored prediction for fixture {fixture_id}.")
 
+    except IntegrityError as e:
+        await db.rollback()
+        logger.error(f"IntegrityError while handling prediction for fixture {fixture_id}: {e}", exc_info=True)
     except Exception as e:
         await db.rollback()
         logger.error(f"An error occurred while fetching prediction for fixture {fixture_id}: {e}", exc_info=True)
 
+
 async def fetch_and_store_odds_for_fixture(fixture_id, client, db, headers):
     try:
-        params = {
-            'fixture': fixture_id
-        }
+        params = {'fixture': fixture_id}
 
+        logger.debug(f"Fetching odds for fixture ID: {fixture_id}")
         response = await client.get(
             "https://v3.football.api-sports.io/odds",
             headers=headers,
             params=params
         )
 
+        logger.debug(f"Response status code: {response.status_code}")
+        logger.debug(f"Response headers: {response.headers}")
+
         if response.status_code != 200:
             logger.error(f"Failed to fetch odds for fixture {fixture_id}: {response.text}")
             return
 
         data = response.json()
+        logger.debug(f"API response for fixture {fixture_id}: {data}")
+
         odds_response = data.get("response", [])
 
         if not odds_response:
             logger.info(f"No odds available for fixture {fixture_id}.")
             return
 
-        # Delete existing odds for this fixture
+        # Delete existing odds for this fixture (Cascade deletes will handle related bookmakers)
         await db.execute(
             delete(models.FixtureOdds).where(models.FixtureOdds.fixture_id == fixture_id)
         )
@@ -200,15 +233,26 @@ async def fetch_and_store_odds_for_fixture(fixture_id, client, db, headers):
                 bookmaker_name = bookmaker_data.get("name")
 
                 # Get or create Bookmaker
-                bookmaker = await db.get(models.Bookmaker, bookmaker_id)
+                bookmaker = await db.execute(
+                    select(models.Bookmaker).where(models.Bookmaker.id == bookmaker_id)
+                )
+                bookmaker = bookmaker.scalars().first()
+
                 if not bookmaker:
+                    logger.debug(f"Inserting new bookmaker: {bookmaker_name} (ID: {bookmaker_id})")
                     bookmaker = models.Bookmaker(
                         id=bookmaker_id,
                         name=bookmaker_name
                     )
                     db.add(bookmaker)
-                    await db.commit()
-                    await db.refresh(bookmaker)
+                    try:
+                        await db.commit()
+                    except IntegrityError:
+                        await db.rollback()
+                        bookmaker = await db.execute(
+                            select(models.Bookmaker).where(models.Bookmaker.id == bookmaker_id)
+                        )
+                        bookmaker = bookmaker.scalars().first()
 
                 fixture_bookmaker = models.FixtureBookmaker(
                     fixture_odds_id=fixture_odds.id,
@@ -224,15 +268,26 @@ async def fetch_and_store_odds_for_fixture(fixture_id, client, db, headers):
                     bet_type_name = bet_data.get("name")
 
                     # Get or create BetType
-                    bet_type = await db.get(models.BetType, bet_type_id)
+                    bet_type = await db.execute(
+                        select(models.BetType).where(models.BetType.id == bet_type_id)
+                    )
+                    bet_type = bet_type.scalars().first()
+
                     if not bet_type:
+                        logger.debug(f"Inserting new bet type: {bet_type_name} (ID: {bet_type_id})")
                         bet_type = models.BetType(
                             id=bet_type_id,
                             name=bet_type_name
                         )
                         db.add(bet_type)
-                        await db.commit()
-                        await db.refresh(bet_type)
+                        try:
+                            await db.commit()
+                        except IntegrityError:
+                            await db.rollback()
+                            bet_type = await db.execute(
+                                select(models.BetType).where(models.BetType.id == bet_type_id)
+                            )
+                            bet_type = bet_type.scalars().first()
 
                     bet = models.Bet(
                         fixture_bookmaker_id=fixture_bookmaker.id,
@@ -254,9 +309,123 @@ async def fetch_and_store_odds_for_fixture(fixture_id, client, db, headers):
                         )
                         db.add(odd_value)
 
-            # Commit all odds for this fixture
-            await db.commit()
+        # Commit all odd values for this fixture
+        await db.commit()
+        logger.info(f"Stored odds for fixture {fixture_id}.")
 
+    except IntegrityError as e:
+        await db.rollback()
+        logger.error(f"IntegrityError while handling odds for fixture {fixture_id}: {e}", exc_info=True)
     except Exception as e:
         await db.rollback()
         logger.error(f"An error occurred while fetching odds for fixture {fixture_id}: {e}", exc_info=True)
+
+
+async def fetch_and_store_match_statistics(fixture_id, client, db, headers):
+    try:
+        params = {'fixture': fixture_id}
+
+        logger.debug(f"Fetching match statistics for fixture ID: {fixture_id}")
+        response = await client.get(
+            "https://v3.football.api-sports.io/fixtures/statistics",
+            headers=headers,
+            params=params
+        )
+
+        logger.debug(f"Response status code: {response.status_code}")
+        logger.debug(f"Response headers: {response.headers}")
+
+        if response.status_code != 200:
+            logger.error(f"Failed to fetch statistics for fixture {fixture_id}: {response.text}")
+            return
+
+        data = response.json()
+        logger.debug(f"API response for fixture {fixture_id}: {data}")
+
+        statistics_response = data.get("response", [])
+
+        if not statistics_response:
+            logger.info(f"No statistics available for fixture {fixture_id}.")
+            return
+
+        # Delete existing statistics for this fixture (Cascade deletes will handle related records)
+        await db.execute(
+            delete(models.MatchStatistics).where(models.MatchStatistics.fixture_id == fixture_id)
+        )
+        await db.commit()
+
+        # Store statistics
+        for stat in statistics_response:
+            team_id = stat.get("team", {}).get("id")
+            statistics = stat.get("statistics", [])
+
+            logger.debug(f"Inserting match statistics for fixture {fixture_id}, team {team_id}")
+            match_statistics = models.MatchStatistics(
+                fixture_id=fixture_id,
+                team_id=team_id,
+                statistics=statistics
+            )
+            db.add(match_statistics)
+
+        await db.commit()
+        logger.info(f"Stored statistics for fixture {fixture_id}.")
+
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"An error occurred while fetching statistics for fixture {fixture_id}: {e}", exc_info=True)
+
+
+async def fetch_and_store_match_events(fixture_id, client, db, headers):
+    try:
+        params = {'fixture': fixture_id}
+
+        logger.debug(f"Fetching match events for fixture ID: {fixture_id}")
+        response = await client.get(
+            "https://v3.football.api-sports.io/fixtures/events",
+            headers=headers,
+            params=params
+        )
+
+        logger.debug(f"Response status code: {response.status_code}")
+        logger.debug(f"Response headers: {response.headers}")
+
+        if response.status_code != 200:
+            logger.error(f"Failed to fetch events for fixture {fixture_id}: {response.text}")
+            return
+
+        data = response.json()
+        logger.debug(f"API response for fixture {fixture_id}: {data}")
+
+        events_response = data.get("response", [])
+
+        if not events_response:
+            logger.info(f"No events available for fixture {fixture_id}.")
+            return
+
+        # Remove existing events for the fixture (Cascade deletes will handle related records)
+        await db.execute(
+            delete(models.MatchEvent).where(models.MatchEvent.fixture_id == fixture_id)
+        )
+        await db.commit()
+
+        # Store events
+        for event_data in events_response:
+            logger.debug(f"Inserting event for fixture {fixture_id}: {event_data}")
+            event = models.MatchEvent(
+                fixture_id=fixture_id,
+                minute=event_data['time']['elapsed'],
+                team_id=event_data['team']['id'],
+                player_id=event_data.get('player', {}).get('id'),
+                player_name=event_data.get('player', {}).get('name'),
+                type=event_data['type'],
+                detail=event_data['detail'],
+                comments=event_data.get('comments')
+            )
+            db.add(event)
+
+        await db.commit()
+        logger.info(f"Stored events for fixture {fixture_id}.")
+
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"An error occurred while fetching events for fixture {fixture_id}: {e}", exc_info=True)

@@ -1,8 +1,20 @@
 # app/models.py
 
-from sqlalchemy import Column, DateTime, Integer, String, ForeignKey, Boolean, Date, JSON, Float
+from sqlalchemy import (
+    Column,
+    DateTime,
+    Integer,
+    String,
+    ForeignKey,
+    Boolean,
+    Date,
+    JSON,
+    Float,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import relationship
 from app.database import Base
+
 
 class League(Base):
     __tablename__ = "leagues"
@@ -15,10 +27,21 @@ class League(Base):
     country_code = Column(String, nullable=True)
     country_flag = Column(String, nullable=True)
 
-    seasons = relationship("Season", back_populates="league", cascade="all, delete-orphan")
-    teams = relationship("Team", back_populates="league", cascade="all, delete-orphan")
-    fixtures = relationship("Fixture", back_populates="league", cascade="all, delete-orphan")
-
+    seasons = relationship(
+        "Season",
+        back_populates="league",
+        cascade="all, delete-orphan",
+    )
+    teams = relationship(
+        "Team",
+        back_populates="league",
+        cascade="all, delete-orphan",
+    )
+    fixtures = relationship(
+        "Fixture",
+        back_populates="league",
+        cascade="all, delete-orphan",
+    )
 
 
 class Season(Base):
@@ -34,6 +57,7 @@ class Season(Base):
 
     league = relationship("League", back_populates="seasons")
 
+
 class Team(Base):
     __tablename__ = "teams"
 
@@ -48,7 +72,12 @@ class Team(Base):
     season_year = Column(Integer, nullable=False)  # New column
 
     league = relationship("League", back_populates="teams")
-    players = relationship("Player", back_populates="team", cascade="all, delete-orphan")
+    players = relationship(
+        "Player",
+        back_populates="team",
+        cascade="all, delete-orphan",
+    )
+
 
 class Player(Base):
     __tablename__ = "players"
@@ -70,9 +99,11 @@ class Player(Base):
     season_year = Column(Integer, nullable=False)  # New column
 
     team = relationship("Team", back_populates="players")
-    statistics = relationship("PlayerStatistics", back_populates="player", cascade="all, delete-orphan")
-
-
+    statistics = relationship(
+        "PlayerStatistics",
+        back_populates="player",
+        cascade="all, delete-orphan",
+    )
 
 
 class PlayerStatistics(Base):
@@ -158,6 +189,7 @@ class Venue(Base):
 
     fixtures = relationship("Fixture", back_populates="venue")
 
+
 class Fixture(Base):
     __tablename__ = "fixtures"
 
@@ -166,7 +198,7 @@ class Fixture(Base):
     timezone = Column(String, nullable=False)
     date = Column(DateTime(timezone=True), nullable=True)
     timestamp = Column(Integer, nullable=False)
-    venue_id = Column(Integer, ForeignKey("venues.id"), nullable=True)
+    venue_id = Column(Integer, ForeignKey("venues.id", ondelete="SET NULL"), nullable=True)
     status_long = Column(String, nullable=False)
     status_short = Column(String, nullable=False)
     status_elapsed = Column(Integer, nullable=True)
@@ -180,7 +212,6 @@ class Fixture(Base):
 
     home_team_id = Column(Integer, ForeignKey("teams.team_id"), nullable=False)
     away_team_id = Column(Integer, ForeignKey("teams.team_id"), nullable=False)
-
 
     goals_home = Column(Integer, nullable=True)
     goals_away = Column(Integer, nullable=True)
@@ -198,8 +229,11 @@ class Fixture(Base):
     away_team = relationship("Team", foreign_keys=[away_team_id])
     league = relationship("League", back_populates="fixtures")
     venue = relationship("Venue", back_populates="fixtures")
-    odds = relationship("FixtureOdds", back_populates="fixture", uselist=False)
-    prediction = relationship("Prediction", uselist=False, back_populates="fixture")
+    odds = relationship("FixtureOdds", back_populates="fixture", uselist=False, cascade="all, delete-orphan")
+    prediction = relationship("Prediction", uselist=False, back_populates="fixture", cascade="all, delete-orphan")
+    match_statistics = relationship('MatchStatistics', back_populates='fixture', cascade="all, delete-orphan")
+    match_events = relationship('MatchEvent', back_populates='fixture', cascade="all, delete-orphan")
+
 
 class Bookmaker(Base):
     __tablename__ = "bookmakers"
@@ -207,7 +241,11 @@ class Bookmaker(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False, unique=True)
 
-    fixture_bookmakers = relationship("FixtureBookmaker", back_populates="bookmaker")
+    fixture_bookmakers = relationship(
+        "FixtureBookmaker",
+        back_populates="bookmaker",
+        cascade="all, delete-orphan",
+    )
 
 
 class BetType(Base):
@@ -216,49 +254,76 @@ class BetType(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False, unique=True)
 
-    bets = relationship("Bet", back_populates="bet_type")
+    bets = relationship(
+        "Bet",
+        back_populates="bet_type",
+        cascade="all, delete-orphan",
+    )
 
 
 class FixtureOdds(Base):
     __tablename__ = "fixture_odds"
 
     id = Column(Integer, primary_key=True)
-    fixture_id = Column(Integer, ForeignKey("fixtures.fixture_id"), nullable=False)
+    fixture_id = Column(
+        Integer,
+        ForeignKey("fixtures.fixture_id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
     update_time = Column(DateTime(timezone=True), nullable=False)
 
     fixture = relationship("Fixture", back_populates="odds")
-    fixture_bookmakers = relationship("FixtureBookmaker", back_populates="fixture_odds")
+    fixture_bookmakers = relationship(
+        "FixtureBookmaker",
+        back_populates="fixture_odds",
+        cascade="all, delete-orphan",
+    )
 
 
 class FixtureBookmaker(Base):
     __tablename__ = "fixture_bookmakers"
 
     id = Column(Integer, primary_key=True)
-    fixture_odds_id = Column(Integer, ForeignKey("fixture_odds.id"), nullable=False)
+    fixture_odds_id = Column(
+        Integer,
+        ForeignKey("fixture_odds.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     bookmaker_id = Column(Integer, ForeignKey("bookmakers.id"), nullable=False)
 
     fixture_odds = relationship("FixtureOdds", back_populates="fixture_bookmakers")
     bookmaker = relationship("Bookmaker", back_populates="fixture_bookmakers")
-    bets = relationship("Bet", back_populates="fixture_bookmaker")
+    bets = relationship(
+        "Bet",
+        back_populates="fixture_bookmaker",
+        cascade="all, delete-orphan",
+    )
 
 
 class Bet(Base):
     __tablename__ = "bets"
 
     id = Column(Integer, primary_key=True)
-    fixture_bookmaker_id = Column(Integer, ForeignKey("fixture_bookmakers.id"), nullable=False)
+    fixture_bookmaker_id = Column(
+        Integer, ForeignKey("fixture_bookmakers.id", ondelete="CASCADE"), nullable=False
+    )
     bet_type_id = Column(Integer, ForeignKey("bet_types.id"), nullable=False)
 
     fixture_bookmaker = relationship("FixtureBookmaker", back_populates="bets")
     bet_type = relationship("BetType", back_populates="bets")
-    odd_values = relationship("OddValue", back_populates="bet")
+    odd_values = relationship(
+        "OddValue",
+        back_populates="bet",
+        cascade="all, delete-orphan",
+    )
 
 
 class OddValue(Base):
     __tablename__ = "odd_values"
 
     id = Column(Integer, primary_key=True)
-    bet_id = Column(Integer, ForeignKey("bets.id"), nullable=False)
+    bet_id = Column(Integer, ForeignKey("bets.id", ondelete="CASCADE"), nullable=False)
     value = Column(String, nullable=False)
     odd = Column(String, nullable=False)
 
@@ -267,8 +332,17 @@ class OddValue(Base):
 
 class Prediction(Base):
     __tablename__ = "predictions"
+    __table_args__ = (
+        UniqueConstraint('fixture_id', name='predictions_fixture_id_key'),
+    )
+
     id = Column(Integer, primary_key=True, index=True)
-    fixture_id = Column(Integer, ForeignKey("fixtures.fixture_id"), unique=True)
+    fixture_id = Column(
+        Integer,
+        ForeignKey("fixtures.fixture_id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+    )
     winner_team_id = Column(Integer, ForeignKey("teams.team_id"))
     win_or_draw = Column(Boolean)
     under_over = Column(String)
@@ -282,3 +356,37 @@ class Prediction(Base):
 
     fixture = relationship("Fixture", back_populates="prediction")
     winner_team = relationship("Team")
+
+
+class MatchStatistics(Base):
+    __tablename__ = 'match_statistics'
+    __table_args__ = (
+        UniqueConstraint('fixture_id', 'team_id', name='match_statistics_fixture_team_key'),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    fixture_id = Column(Integer, ForeignKey('fixtures.fixture_id', ondelete="CASCADE"), nullable=False)
+    team_id = Column(Integer, ForeignKey('teams.team_id'), nullable=False)
+    statistics = Column(JSON)
+
+    # Relationships
+    fixture = relationship('Fixture', back_populates='match_statistics')
+    team = relationship('Team')
+
+
+class MatchEvent(Base):
+    __tablename__ = 'match_events'
+
+    id = Column(Integer, primary_key=True)
+    fixture_id = Column(Integer, ForeignKey('fixtures.fixture_id', ondelete="CASCADE"))
+    minute = Column(Integer)
+    team_id = Column(Integer, ForeignKey('teams.team_id'))
+    player_id = Column(Integer, ForeignKey('players.player_id'), nullable=True)
+    player_name = Column(String)
+    type = Column(String)  # e.g., 'Goal', 'Card', 'Substitution', etc.
+    detail = Column(String)  # e.g., 'Normal Goal', 'Yellow Card', etc.
+    comments = Column(String, nullable=True)
+
+    fixture = relationship('Fixture', back_populates='match_events')
+    team = relationship('Team')
+    player = relationship('Player', lazy='joined')

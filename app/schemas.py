@@ -399,6 +399,30 @@ class FixtureDetailedResponse(FixtureBaseDetailed):
     away_team_stats: Optional[TeamStatistics] = None
     home_top_players: Optional[List[TopPlayer]] = None
     away_top_players: Optional[List[TopPlayer]] = None
+    match_statistics: Optional[Dict[str, Dict[str, Any]]] = None  # Updated line
+    match_events: Optional[List[MatchEvent]] = None
 
     model_config = ConfigDict(from_attributes=True)
 
+
+class MatchStatistics(BaseModel):
+    fixture_id: int
+    team_id: int
+    statistics: List[Dict[str, Any]]  # Assuming statistics is a list of dicts
+
+    model_config = ConfigDict(from_attributes=True)
+
+class MatchEvent(BaseModel):
+    fixture_id: int
+    minute: int
+    team_id: int
+    player_id: Optional[int]
+    player_name: Optional[str]
+    type: str
+    detail: Optional[str]
+    comments: Optional[str]
+
+
+
+FixtureBase.model_rebuild()
+FixtureDetailedResponse.model_rebuild()

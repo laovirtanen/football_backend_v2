@@ -1,304 +1,234 @@
 # app/routers/retrieval/fixtures.py
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
-from sqlalchemy import Date, cast, func, desc, case, or_
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy.orm import selectinload
-from typing import List, Optional
-from datetime import datetime, timedelta, timezone
-
-from app import models, schemas
-from app.database import get_db
-
+from datetime import date, datetime
 import logging
-
-logger = logging.getLogger(__name__)
+from typing import List, Dict, Any, Optional
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import Date, cast, desc, func, select, or_
+from sqlalchemy.orm import selectinload
+from app.database import get_db
+from app import models, schemas
 
 router = APIRouter(
     prefix="/fixtures",
     tags=["fixtures"]
 )
 
+logger = logging.getLogger(__name__)
 
-@router.get("/", response_model=List[schemas.FixtureBaseDetailed])
+@router.get("/", response_model=List[schemas.FixtureBase])
 async def get_fixtures(
-    db: AsyncSession = Depends(get_db),
-    league_id: Optional[int] = Query(None, description="Filter by league ID"),
-    team_id: Optional[int] = Query(None, description="Filter by team ID (home or away)"),
-    season_year: Optional[int] = Query(None, description="Filter by season year"),
-    date_from: Optional[datetime] = Query(None, description="Start date in YYYY-MM-DD format"),
-    date_to: Optional[datetime] = Query(None, description="End date in YYYY-MM-DD format"),
-    status: Optional[str] = Query(None, description="Filter by match status"),
-    limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0)
+    league_id: int = Query(..., description="ID of the league"),
+    season_year: int = Query(..., description="Season year"),
+    date_from: Optional[date] = Query(None, description="Start date in YYYY-MM-DD format"),
+    date_to: Optional[date] = Query(None, description="End date in YYYY-MM-DD format"),
+    db: AsyncSession = Depends(get_db)
 ):
+    logger.info(f"Fetching fixtures with league_id={league_id}, season_year={season_year}, date_from={date_from}, date_to={date_to}")
     try:
-        logger.info("Fetching fixtures with filters: league_id=%s, team_id=%s, season_year=%s, date_from=%s, date_to=%s, status=%s, limit=%s, offset=%s",
-                    league_id, team_id, season_year, date_from, date_to, status, limit, offset)
-
-        fixture_ids_query = select(models.Fixture.fixture_id)
-
-        if league_id:
-            fixture_ids_query = fixture_ids_query.where(models.Fixture.league_id == league_id)
-        if team_id:
-            fixture_ids_query = fixture_ids_query.where(
-                (models.Fixture.home_team_id == team_id) |
-                (models.Fixture.away_team_id == team_id)
-            )
-        if season_year:
-            fixture_ids_query = fixture_ids_query.where(models.Fixture.season_year == season_year)
-
-        if date_from and date_to and date_from.date() == date_to.date():
-            date_only = date_from.date()
-            fixture_ids_query = fixture_ids_query.where(
-                cast(models.Fixture.date, Date) == date_only
-            )
-        else:
-            if date_from:
-                fixture_ids_query = fixture_ids_query.where(
-                    cast(models.Fixture.date, Date) >= date_from.date()
-                )
-            if date_to:
-                fixture_ids_query = fixture_ids_query.where(
-                    cast(models.Fixture.date, Date) <= date_to.date()
-                )
-
-        if status:
-            fixture_ids_query = fixture_ids_query.where(models.Fixture.status_short.ilike(f"%{status}%"))
-
-        fixture_ids_query = fixture_ids_query.offset(offset).limit(limit)
-
-        logger.debug("Executing Fixture IDs Query: %s", fixture_ids_query)
-
-        # Execute the query to get fixture IDs
-        result = await db.execute(fixture_ids_query)
-        fixture_ids = result.scalars().all()
-
-        logger.info("Found %d fixtures matching filters.", len(fixture_ids))
-
-        if not fixture_ids:
-            logger.info("No fixtures found for the given filters.")
-            return []
-
-        # Now fetch the fixtures with relationships
-        fixtures_query = (
-            select(models.Fixture)
-            .where(models.Fixture.fixture_id.in_(fixture_ids))
-            .options(
-                selectinload(models.Fixture.home_team),
-                selectinload(models.Fixture.away_team),
-                selectinload(models.Fixture.league),
-                selectinload(models.Fixture.venue),
-                selectinload(models.Fixture.prediction),
-                selectinload(models.Fixture.odds)
-                    .selectinload(models.FixtureOdds.fixture_bookmakers)
-                    .selectinload(models.FixtureBookmaker.bookmaker),
-                selectinload(models.Fixture.odds)
-                    .selectinload(models.FixtureOdds.fixture_bookmakers)
-                    .selectinload(models.FixtureBookmaker.bets)
-                    .selectinload(models.Bet.bet_type),
-                selectinload(models.Fixture.odds)
-                    .selectinload(models.FixtureOdds.fixture_bookmakers)
-                    .selectinload(models.FixtureBookmaker.bets)
-                    .selectinload(models.Bet.odd_values),
-            )
+        # Initialize the query
+        query = select(models.Fixture).where(
+            models.Fixture.league_id == league_id,
+            models.Fixture.season_year == season_year
+        ).options(
+            selectinload(models.Fixture.home_team),
+            selectinload(models.Fixture.away_team),
+            selectinload(models.Fixture.league),
+            selectinload(models.Fixture.venue),
+            selectinload(models.Fixture.prediction),
+            selectinload(models.Fixture.match_events),
+            selectinload(models.Fixture.match_statistics),
+            selectinload(models.Fixture.odds)
+                .selectinload(models.FixtureOdds.fixture_bookmakers)
+                .selectinload(models.FixtureBookmaker.bookmaker),
+            # Load bets and their bet_types
+            selectinload(models.Fixture.odds)
+                .selectinload(models.FixtureOdds.fixture_bookmakers)
+                .selectinload(models.FixtureBookmaker.bets)
+                .selectinload(models.Bet.bet_type),
+            # Load bets and their odd_values
+            selectinload(models.Fixture.odds)
+                .selectinload(models.FixtureOdds.fixture_bookmakers)
+                .selectinload(models.FixtureBookmaker.bets)
+                .selectinload(models.Bet.odd_values),
         )
 
-        logger.debug("Executing Fixtures Query: %s", fixtures_query)
+        # Apply date filters
+        if date_from and date_to and date_from == date_to:
+            # When both dates are the same
+            query = query.where(cast(models.Fixture.date, Date) == date_from)
+        else:
+            if date_from:
+                query = query.where(cast(models.Fixture.date, Date) >= date_from)
+            if date_to:
+                query = query.where(cast(models.Fixture.date, Date) <= date_to)
 
-        fixtures_result = await db.execute(fixtures_query)
-        fixtures = fixtures_result.scalars().all()
+        result = await db.execute(query)
+        fixtures = result.scalars().all()
 
-        logger.info("Returning %d fixtures with detailed information.", len(fixtures))
+        if not fixtures:
+            logger.warning("No fixtures found for the given parameters.")
+            return []
+
         return fixtures
-    except Exception as e:
-        logger.error("Error fetching fixtures: %s", e)
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
 
+    except Exception as e:
+        logger.error(f"Error fetching fixtures: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
 @router.get("/{fixture_id}/detailed", response_model=schemas.FixtureDetailedResponse)
 async def get_detailed_fixture(
     fixture_id: int = Path(..., description="The ID of the fixture to retrieve"),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Retrieve detailed information for a specific fixture, including comprehensive statistics.
-    """
-    try:
-        logger.info("Fetching detailed fixture for fixture_id: %s", fixture_id)
+    logger.info(f"Fetching detailed fixture for fixture_id: {fixture_id}")
 
-        # Fetch the fixture with related data
-        fixture_query = select(models.Fixture).where(models.Fixture.fixture_id == fixture_id).options(
-            selectinload(models.Fixture.home_team),
-            selectinload(models.Fixture.away_team),
-            selectinload(models.Fixture.league),
-            selectinload(models.Fixture.venue),
-            selectinload(models.Fixture.prediction),
-            selectinload(models.Fixture.odds)
-                .selectinload(models.FixtureOdds.fixture_bookmakers)
-                .selectinload(models.FixtureBookmaker.bookmaker),
-            selectinload(models.Fixture.odds)
-                .selectinload(models.FixtureOdds.fixture_bookmakers)
-                .selectinload(models.FixtureBookmaker.bets)
-                .selectinload(models.Bet.bet_type),
-            selectinload(models.Fixture.odds)
-                .selectinload(models.FixtureOdds.fixture_bookmakers)
-                .selectinload(models.FixtureBookmaker.bets)
-                .selectinload(models.Bet.odd_values),
-        )
-        fixture_result = await db.execute(fixture_query)
-        fixture = fixture_result.scalar_one_or_none()
-        if not fixture:
-            logger.warning(f"Fixture with id {fixture_id} not found.")
-            raise HTTPException(status_code=404, detail="Fixture not found")
-
-        logger.info(f"Fixture fetched: {fixture.fixture_id}")
-
-        # Gather additional data
-        home_team_id = fixture.home_team_id
-        away_team_id = fixture.away_team_id
-        season_year = fixture.season_year
-
-        logger.info(f"Home Team ID: {home_team_id}, Away Team ID: {away_team_id}, Season Year: {season_year}")
-
-        # Head-to-Head Stats
-        time_range = datetime.now(timezone.utc) - timedelta(days=365 * 5)
-        recent_matches_limit = 5
-
-        h2h_query = select(models.Fixture).where(
-            (
-                (models.Fixture.home_team_id == home_team_id) & (models.Fixture.away_team_id == away_team_id)
-            ) | (
-                (models.Fixture.home_team_id == away_team_id) & (models.Fixture.away_team_id == home_team_id)
+    # Fetch the fixture with related data
+    fixture_query = select(models.Fixture).where(models.Fixture.fixture_id == fixture_id).options(
+        selectinload(models.Fixture.home_team),
+        selectinload(models.Fixture.away_team),
+        selectinload(models.Fixture.league),
+        selectinload(models.Fixture.venue),
+        selectinload(models.Fixture.prediction),
+        selectinload(models.Fixture.match_events),
+        selectinload(models.Fixture.match_statistics),
+        selectinload(models.Fixture.odds).options(
+            selectinload(models.FixtureOdds.fixture_bookmakers).options(
+                selectinload(models.FixtureBookmaker.bookmaker),
+                selectinload(models.FixtureBookmaker.bets).options(
+                    selectinload(models.Bet.bet_type),
+                    selectinload(models.Bet.odd_values),
+                ),
             ),
-            models.Fixture.status_short == 'FT',
-            models.Fixture.date >= time_range
-        ).order_by(desc(models.Fixture.date)).limit(recent_matches_limit).options(
-            selectinload(models.Fixture.home_team),
-            selectinload(models.Fixture.away_team)
-        )
+        ),
+    )
+    fixture_result = await db.execute(fixture_query)
+    fixture = fixture_result.scalar_one_or_none()
+    if not fixture:
+        logger.warning(f"Fixture with id {fixture_id} not found.")
+        raise HTTPException(status_code=404, detail="Fixture not found")
 
-        logger.debug("Executing Head-to-Head Query: %s", h2h_query)
-        h2h_result = await db.execute(h2h_query)
-        h2h_fixtures = h2h_result.scalars().all()
-        logger.info(f"Found {len(h2h_fixtures)} head-to-head fixtures.")
+    # Prepare detailed fixture data
+    detailed_fixture_data = schemas.FixtureBaseDetailed.model_validate(fixture, from_attributes=True).model_dump()
 
-        h2h_stats = await calculate_h2h_stats(h2h_fixtures, home_team_id, away_team_id)
-        logger.debug(f"H2H Stats: {h2h_stats}")
+    # Process match events
+    match_events = []
+    if fixture.match_events:
+        for event in fixture.match_events:
+            match_event = schemas.MatchEvent.model_validate(event, from_attributes=True).model_dump()
+            match_events.append(match_event)
+    detailed_fixture_data['match_events'] = match_events
 
-        # Recent Form for Both Teams
-        home_recent_form = await get_team_recent_form(db, home_team_id, recent_matches_limit)
-        away_recent_form = await get_team_recent_form(db, away_team_id, recent_matches_limit)
-        logger.debug(f"Home Recent Form: {home_recent_form}")
-        logger.debug(f"Away Recent Form: {away_recent_form}")
+    # Process match statistics
+    match_statistics = {}
+    if fixture.match_statistics:
+        for stat in fixture.match_statistics:
+            stats_dict = schemas.MatchStatistics.model_validate(stat, from_attributes=True).model_dump()
+            team_id = stats_dict['team_id']
+            if team_id == fixture.home_team_id:
+                match_statistics['home'] = {item['type']: item['value'] for item in stats_dict['statistics']}
+            elif team_id == fixture.away_team_id:
+                match_statistics['away'] = {item['type']: item['value'] for item in stats_dict['statistics']}
+    detailed_fixture_data['match_statistics'] = match_statistics
 
-        # Team Statistics
-        home_team_stats = await get_team_statistics(db, home_team_id, season_year)
-        away_team_stats = await get_team_statistics(db, away_team_id, season_year)
-        logger.debug(f"Home Team Stats: {home_team_stats}")
-        logger.debug(f"Away Team Stats: {away_team_stats}")
+    # Include odds if available
+    if fixture.odds:
+        detailed_fixture_data['odds'] = schemas.FixtureOddsSchema.model_validate(fixture.odds, from_attributes=True).model_dump()
 
-        # Top Players (e.g., Top Scorers)
-        home_top_players = await get_top_players(db, home_team_id, season_year)
-        away_top_players = await get_top_players(db, away_team_id, season_year)
-        logger.debug(f"Home Top Players: {home_top_players}")
-        logger.debug(f"Away Top Players: {away_top_players}")
+    # Include prediction if available
+    if fixture.prediction:
+        detailed_fixture_data['prediction'] = schemas.PredictionSchema.model_validate(fixture.prediction, from_attributes=True).model_dump()
 
-        # Serialize the base fixture data
-        fixture_base = schemas.FixtureBaseDetailed.model_validate(fixture, from_attributes=True).model_dump()
+    # Fetch head-to-head stats
+    h2h_stats = await get_h2h_stats(db, fixture.home_team_id, fixture.away_team_id)
 
-        # Assemble the complete data for FixtureDetailedResponse
-        detailed_fixture_data = fixture_base.copy()
-        detailed_fixture_data.update({
-            'h2h_stats': h2h_stats,  # Pass the model instance directly
-            'home_recent_form': home_recent_form,  # Pass the list of models directly
-            'away_recent_form': away_recent_form,
-            'home_team_stats': home_team_stats,
-            'away_team_stats': away_team_stats,
-            'home_top_players': home_top_players,
-            'away_top_players': away_top_players,
-        })
+    # Fetch recent form for both teams
+    home_recent_form = await get_team_recent_form(db, fixture.home_team_id)
+    away_recent_form = await get_team_recent_form(db, fixture.away_team_id)
 
-        logger.info("Assembling FixtureDetailedResponse.")
-        # Validate and create the FixtureDetailedResponse instance
-        detailed_fixture = schemas.FixtureDetailedResponse(**detailed_fixture_data)
+    # Fetch team statistics
+    season_year = fixture.season_year
+    home_team_stats = await get_team_statistics(db, fixture.home_team_id, season_year)
+    away_team_stats = await get_team_statistics(db, fixture.away_team_id, season_year)
 
-        logger.info("FixtureDetailedResponse constructed successfully.")
-        return detailed_fixture
+    # Fetch top players
+    home_top_players = await get_top_players(db, fixture.home_team_id, season_year)
+    away_top_players = await get_top_players(db, fixture.away_team_id, season_year)
 
-    except Exception as e:
-        logger.error("Error fetching detailed fixture: %s", e)
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+    # Include additional data in the response
+    detailed_fixture_data.update({
+        'h2h_stats': h2h_stats.model_dump(),
+        'home_recent_form': [form.model_dump() for form in home_recent_form],
+        'away_recent_form': [form.model_dump() for form in away_recent_form],
+        'home_team_stats': home_team_stats.model_dump(),
+        'away_team_stats': away_team_stats.model_dump(),
+        'home_top_players': [player.model_dump() for player in home_top_players],
+        'away_top_players': [player.model_dump() for player in away_top_players],
+    })
 
+    detailed_fixture_response = schemas.FixtureDetailedResponse(**detailed_fixture_data)
 
-# Helper Functions
+    logger.info(f"Returning detailed fixture for fixture_id: {fixture_id}")
+    return detailed_fixture_response
 
-async def calculate_h2h_stats(fixtures: List[models.Fixture], home_team_id: int, away_team_id: int) -> schemas.FixtureH2HStats:
+async def get_h2h_stats(db: AsyncSession, home_team_id: int, away_team_id: int) -> schemas.FixtureH2HStats:
+    logger.debug(f"Fetching H2H stats for home_team_id: {home_team_id}, away_team_id: {away_team_id}")
+
+    h2h_query = select(models.Fixture).where(
+        or_(
+            (models.Fixture.home_team_id == home_team_id) & (models.Fixture.away_team_id == away_team_id),
+            (models.Fixture.home_team_id == away_team_id) & (models.Fixture.away_team_id == home_team_id)
+        ),
+        models.Fixture.status_short == 'FT'
+    ).order_by(models.Fixture.date.desc()).limit(5).options(
+        selectinload(models.Fixture.home_team),
+        selectinload(models.Fixture.away_team)
+    )
+
+    result = await db.execute(h2h_query)
+    fixtures = result.scalars().all()
+
     total_matches = len(fixtures)
-    home_wins = 0
-    away_wins = 0
-    draws = 0
-    recent_matches_list = []
+    home_team_wins = away_team_wins = draws = 0
+    recent_matches = []
 
     for fixture in fixtures:
         if fixture.goals_home is None or fixture.goals_away is None:
-            continue  # Skip if scores are missing
+            continue
 
-        if fixture.home_team_id == home_team_id:
-            gf = fixture.goals_home or 0
-            ga = fixture.goals_away or 0
-            opponent_name = fixture.away_team.name
-            home_or_away = 'Home'
-        else:
-            gf = fixture.goals_away or 0
-            ga = fixture.goals_home or 0
-            opponent_name = fixture.home_team.name
-            home_or_away = 'Away'
-
-        if gf > ga:
-            outcome = 'W'
+        if fixture.goals_home > fixture.goals_away:
             if fixture.home_team_id == home_team_id:
-                home_wins += 1
+                home_team_wins += 1
             else:
-                away_wins += 1
-        elif gf < ga:
-            outcome = 'L'
-            if fixture.home_team_id == home_team_id:
-                away_wins += 1
+                away_team_wins += 1
+        elif fixture.goals_home < fixture.goals_away:
+            if fixture.away_team_id == home_team_id:
+                home_team_wins += 1
             else:
-                home_wins += 1
+                away_team_wins += 1
         else:
-            outcome = 'D'
             draws += 1
 
-        recent_match = schemas.TeamRecentForm(
-            fixture_id=fixture.fixture_id,
-            date=fixture.date,
-            opponent=opponent_name,
-            home_or_away=home_or_away,
-            goals_for=gf,
-            goals_against=ga,
-            outcome=outcome
-        )
-        recent_matches_list.append(recent_match)
+        recent_match = {
+            'fixture_id': fixture.fixture_id,
+            'date': fixture.date,
+            'home_team': fixture.home_team.name,
+            'away_team': fixture.away_team.name,
+            'goals_home': fixture.goals_home,
+            'goals_away': fixture.goals_away
+        }
+        recent_matches.append(recent_match)
 
     h2h_stats = schemas.FixtureH2HStats(
         total_matches=total_matches,
-        home_team_wins=home_wins,
-        away_team_wins=away_wins,
+        home_team_wins=home_team_wins,
+        away_team_wins=away_team_wins,
         draws=draws,
-        recent_matches=recent_matches_list
+        recent_matches=recent_matches
     )
 
     return h2h_stats
-
-
-# In fixtures.py
 
 async def get_team_recent_form(db: AsyncSession, team_id: int, limit: int = 15) -> List[schemas.TeamRecentForm]:
     recent_fixtures_query = select(models.Fixture).where(
@@ -307,7 +237,7 @@ async def get_team_recent_form(db: AsyncSession, team_id: int, limit: int = 15) 
             models.Fixture.away_team_id == team_id
         ),
         models.Fixture.status_short == 'FT'
-    ).order_by(desc(models.Fixture.date)).limit(limit).options(
+    ).order_by(models.Fixture.date.desc()).limit(limit).options(
         selectinload(models.Fixture.home_team),
         selectinload(models.Fixture.away_team)
     )
@@ -355,8 +285,6 @@ async def get_team_recent_form(db: AsyncSession, team_id: int, limit: int = 15) 
 
     logger.debug(f"Recent form for team_id {team_id}: {recent_form}")
     return recent_form
-
-
 
 async def get_team_statistics(db: AsyncSession, team_id: int, season_year: int) -> schemas.TeamStatistics:
     logger.debug("Fetching team statistics for team_id: %s, season_year: %s", team_id, season_year)
@@ -473,7 +401,6 @@ async def get_team_statistics(db: AsyncSession, team_id: int, season_year: int) 
 
     logger.debug(f"Team statistics: {team_stats}")
     return team_stats
-
 
 async def get_top_players(
     db: AsyncSession, team_id: int, season_year: int, limit: int = 5
