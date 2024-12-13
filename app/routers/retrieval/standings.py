@@ -96,7 +96,9 @@ async def get_league_standings(
             .where(
                 models.Team.league_id == league_id,
                 models.Team.season_year == season_year,
-                models.Fixture.status_short == 'FT'
+                models.Fixture.status_short == 'FT',
+                models.Fixture.league_id == league_id,
+                models.Fixture.season_year == season_year
             )
             .group_by(models.Team.team_id)
             .subquery()

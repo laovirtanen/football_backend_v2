@@ -38,11 +38,11 @@ async def fetch_and_store_fixtures_data(db: AsyncSession = Depends(get_db)):
         }
 
         async with httpx.AsyncClient() as client:
-            # Fetch fixtures within a certain date range (modify as needed)
-            start_date = datetime(2024, 8, 14, tzinfo=timezone.utc)
-            end_date = datetime(2025, 5, 26, tzinfo=timezone.utc)
+            # Set the date range to today +- 2 weeks
+            today = datetime.now(timezone.utc)
+            start_date = today - timedelta(weeks=2)
+            end_date = today + timedelta(weeks=2)
             logger.debug(f"Fetching fixtures between {start_date} and {end_date}")
-
 
             fixtures_result = await db.execute(
                 select(models.Fixture.fixture_id, models.Fixture.status_short).filter(

@@ -4,20 +4,20 @@ import requests
 BASE_URL = "http://127.0.0.1:8000"
 
 # Step 1: Ingest leagues
-# response = requests.post(f"{BASE_URL}/leagues/")
-# if response.ok:
-#     leagues_data = response.json()
-#     print(f"Leagues ingestion response: {response.status_code}, {leagues_data}")
-# else:
-#     print(f"Leagues ingestion failed with status code: {response.status_code}, response text: {response.text}")
+response = requests.post(f"{BASE_URL}/leagues/")
+if response.ok:
+    leagues_data = response.json()
+    print(f"Leagues ingestion response: {response.status_code}, {leagues_data}")
+else:
+    print(f"Leagues ingestion failed with status code: {response.status_code}, response text: {response.text}")
 
 # Step 2: Ingest teams
-# response = requests.post(f"{BASE_URL}/teams/")
-# if response.ok:
-#     teams_data = response.json()
-#     print(f"Teams ingestion response: {response.status_code}, {teams_data}")
-# else:
-#     print(f"Teams ingestion failed with status code: {response.status_code}, response text: {response.text}")
+response = requests.post(f"{BASE_URL}/teams/")
+if response.ok:
+    teams_data = response.json()
+    print(f"Teams ingestion response: {response.status_code}, {teams_data}")
+else:
+    print(f"Teams ingestion failed with status code: {response.status_code}, response text: {response.text}")
 
 # Step 3: Ingest players
 response = requests.post(f"{BASE_URL}/players/")
