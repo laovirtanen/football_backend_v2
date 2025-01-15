@@ -11,6 +11,7 @@ from sqlalchemy import (
     JSON,
     Float,
     UniqueConstraint,
+    ForeignKeyConstraint,
 )
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -27,13 +28,10 @@ class League(Base):
     country_code = Column(String, nullable=True)
     country_flag = Column(String, nullable=True)
 
+    # Define relationship to TeamLeague
+    teams = relationship("TeamLeague", back_populates="league", cascade="all, delete-orphan")
     seasons = relationship(
         "Season",
-        back_populates="league",
-        cascade="all, delete-orphan",
-    )
-    teams = relationship(
-        "Team",
         back_populates="league",
         cascade="all, delete-orphan",
     )
@@ -44,18 +42,40 @@ class League(Base):
     )
 
 
+class TeamLeague(Base):
+    __tablename__ = "team_leagues"
+    __table_args__ = (
+        UniqueConstraint('team_id', 'league_id', 'season_year', name='uix_team_league_season'),
+        ForeignKeyConstraint(['league_id', 'season_year'], ['seasons.league_id', 'seasons.year'])
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    team_id = Column(Integer, ForeignKey("teams.team_id"), nullable=False)
+    league_id = Column(Integer, ForeignKey("leagues.league_id"), nullable=False)
+    season_year = Column(Integer, nullable=False)
+
+    team = relationship("Team", back_populates="team_leagues")
+    league = relationship("League", back_populates="teams")
+    season = relationship("Season", back_populates="team_leagues")
+
+
 class Season(Base):
     __tablename__ = "seasons"
 
     id = Column(Integer, primary_key=True, index=True)
     league_id = Column(Integer, ForeignKey("leagues.league_id"), index=True)
     year = Column(Integer)
-    start = Column(Date)
-    end = Column(Date)
+    start_date = Column(Date)
+    end_date = Column(Date)
     current = Column(Boolean)
     coverage = Column(JSON)
 
+    __table_args__ = (
+        UniqueConstraint('league_id', 'year', name='uix_league_year'),
+    )
+
     league = relationship("League", back_populates="seasons")
+    team_leagues = relationship("TeamLeague", back_populates="season", cascade="all, delete-orphan")
 
 
 class Team(Base):
@@ -68,10 +88,10 @@ class Team(Base):
     founded = Column(Integer, nullable=True)
     national = Column(Boolean)
     logo = Column(String, nullable=True)
-    league_id = Column(Integer, ForeignKey("leagues.league_id"), nullable=False)
-    season_year = Column(Integer, nullable=False)  # New column
 
-    league = relationship("League", back_populates="teams")
+    # Define relationship to TeamLeague
+    team_leagues = relationship("TeamLeague", back_populates="team")
+
     players = relationship(
         "Player",
         back_populates="team",

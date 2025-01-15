@@ -1,7 +1,10 @@
+# app/schemas.py
+
 from __future__ import annotations
 from pydantic import BaseModel, ConfigDict
 from typing import Dict, Optional, Any, List
 from datetime import date, datetime
+
 
 class BookmakerSchema(BaseModel):
     id: int
@@ -40,6 +43,7 @@ class FixtureBookmakerSchema(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+
 class FixtureOddsSchema(BaseModel):
     id: int
     update_time: datetime
@@ -47,6 +51,7 @@ class FixtureOddsSchema(BaseModel):
     fixture_bookmakers: List[FixtureBookmakerSchema]
 
     model_config = ConfigDict(from_attributes=True)
+
 
 class LeagueBase(BaseModel):
     league_id: int
@@ -64,12 +69,13 @@ class SeasonBase(BaseModel):
     id: int
     league_id: int
     year: int
-    start: Optional[date]
-    end: Optional[date]
+    start_date: Optional[date]
+    end_date: Optional[date]
     current: bool
     coverage: Optional[Any] = None
 
     model_config = ConfigDict(from_attributes=True)
+
 
 class TeamBase(BaseModel):
     team_id: int
@@ -79,8 +85,27 @@ class TeamBase(BaseModel):
     founded: Optional[int]
     national: Optional[bool]
     logo: Optional[str]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TeamLeagueSchema(BaseModel):
     league_id: int
     season_year: int
+    team: TeamBase  
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TeamDetailed(BaseModel):
+    team_id: int
+    name: str
+    code: Optional[str]
+    country: Optional[str]
+    founded: Optional[int]
+    national: Optional[bool]
+    logo: Optional[str]
+    team_leagues: List[TeamLeagueSchema] = []
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -195,8 +220,8 @@ class FixtureBase(BaseModel):
     status_elapsed: Optional[int]
     status_extra: Optional[str]
     league_id: int
-    home_team: 'TeamBase'  # Include home_team
-    away_team: 'TeamBase'  # Include away_team
+    home_team: 'TeamBase'  
+    away_team: 'TeamBase'  
     season_year: int
     round: Optional[str]
     home_team_id: int
@@ -216,29 +241,26 @@ class FixtureBase(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-
 class PredictionBase(BaseModel):
     fixture_id: int
     winner_team_id: Optional[int] = None
     win_or_draw: Optional[bool] = None
     under_over: Optional[str] = None
-    goals_home: Optional[str] = None
-    goals_away: Optional[str] = None
-    advice: Optional[str] = None
-    percent_home: Optional[str] = None
-    percent_draw: Optional[str] = None
-    percent_away: Optional[str] = None
+    goals_home: Optional[str]
+    goals_away: Optional[str]
+    advice: Optional[str]
+    percent_home: Optional[str]
+    percent_draw: Optional[str]
+    percent_away: Optional[str]
     comparison: Optional[Dict[str, Any]] = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class LeagueWithTeams(LeagueBase):
-    teams: List[TeamBase] = []
+    teams: List[TeamLeagueSchema] = []
 
     model_config = ConfigDict(from_attributes=True)
-
-
 
 
 class FixtureBaseDetailed(BaseModel):
@@ -290,8 +312,6 @@ class PredictionSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-
-
 class TeamStanding(BaseModel):
     rank: int
     team: TeamBase
@@ -305,8 +325,6 @@ class TeamStanding(BaseModel):
     goal_difference: int
 
     model_config = ConfigDict(from_attributes=True)
-
-
 
 
 class TeamStatistics(BaseModel):
@@ -323,10 +341,10 @@ class TeamStatistics(BaseModel):
     average_shots_on_target: Optional[float] = None
     average_tackles: Optional[float] = None
     average_key_passes: Optional[float] = None
+    average_passes_accuracy: Optional[float] = None  
+
 
     model_config = ConfigDict(from_attributes=True)
-
-
 
 
 class PlayerRanking(BaseModel):
@@ -337,7 +355,6 @@ class PlayerRanking(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-
 class PredictionAccuracy(BaseModel):
     total_predictions: int
     correct_predictions: int
@@ -346,15 +363,13 @@ class PredictionAccuracy(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-FixtureBaseDetailed.model_rebuild()
-
-
 class FixtureH2HStats(BaseModel):
     total_matches: int
     home_team_wins: int
     away_team_wins: int
     draws: int
     recent_matches: List[Dict[str, Any]]
+
 
 class TeamRecentForm(BaseModel):
     fixture_id: int
@@ -369,7 +384,8 @@ class TeamRecentForm(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-class TeamStatistics(BaseModel):
+
+class TeamStatisticsDetailed(BaseModel):
     matches_played: int
     wins: int
     draws: int
@@ -384,6 +400,7 @@ class TeamStatistics(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+
 class TopPlayer(BaseModel):
     player_id: int
     name: str
@@ -391,26 +408,28 @@ class TopPlayer(BaseModel):
     goals: Optional[int]
     photo: Optional[str]
 
+
 class FixtureDetailedResponse(FixtureBaseDetailed):
     h2h_stats: Optional[FixtureH2HStats] = None
     home_recent_form: Optional[List[TeamRecentForm]] = None
     away_recent_form: Optional[List[TeamRecentForm]] = None
-    home_team_stats: Optional[TeamStatistics] = None
-    away_team_stats: Optional[TeamStatistics] = None
+    home_team_stats: Optional[TeamStatisticsDetailed] = None
+    away_team_stats: Optional[TeamStatisticsDetailed] = None
     home_top_players: Optional[List[TopPlayer]] = None
     away_top_players: Optional[List[TopPlayer]] = None
-    match_statistics: Optional[Dict[str, Dict[str, Any]]] = None  # Updated line
+    match_statistics: Optional[Dict[str, Dict[str, Any]]] = None
     match_events: Optional[List[MatchEvent]] = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
-class MatchStatistics(BaseModel):
+class MatchStatisticsBase(BaseModel):
     fixture_id: int
     team_id: int
-    statistics: List[Dict[str, Any]]  # Assuming statistics is a list of dicts
+    statistics: List[Dict[str, Any]]  
 
     model_config = ConfigDict(from_attributes=True)
+
 
 class MatchEvent(BaseModel):
     fixture_id: int
@@ -422,7 +441,4 @@ class MatchEvent(BaseModel):
     detail: Optional[str]
     comments: Optional[str]
 
-
-
-FixtureBase.model_rebuild()
-FixtureDetailedResponse.model_rebuild()
+    model_config = ConfigDict(from_attributes=True)

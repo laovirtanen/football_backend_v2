@@ -1,10 +1,12 @@
+# app/routers/ingest_leagues.py
+
 import logging
 import os
 import httpx
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.database import get_db
 from app import models
@@ -14,9 +16,8 @@ router = APIRouter(
     tags=["leagues"]
 )
 
-# Create a logger for this module
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)  # Ensure DEBUG logging is enabled
+logger.setLevel(logging.DEBUG) 
 
 API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY")
 
@@ -45,24 +46,29 @@ async def fetch_and_store_leagues(db: AsyncSession = Depends(get_db)):
             }
 
             logger.debug(f"Fetching league data from {url} with params {params}")
-            response = await client.get(url, headers=headers, params=params)
+            try:
+                response = await client.get(url, headers=headers, params=params)
+            except httpx.RequestError as e:
+                logger.error(f"Request error for league {league_id}: {e}")
+                continue  
+
             logger.debug(f"API response status for league {league_id}: {response.status_code}")
 
             if response.status_code != 200:
                 logger.error(f"API Error for league {league_id}: {response.status_code} - {response.text}")
-                continue  # Move to next league
+                continue  
 
             try:
                 data = response.json()
                 logger.debug(f"League {league_id} raw API response: {data}")
             except ValueError as e:
                 logger.error(f"JSON decoding error for league {league_id}: {e}")
-                continue  # Skip this league
+                continue  #
 
             league_response = data.get("response", [])
             if not league_response:
                 logger.warning(f"No data found for league {league_id} in API response.")
-                continue  # Move to the next league ID
+                continue 
 
             # Extract league info
             league_info_data = league_response[0].get("league", {})
@@ -90,74 +96,104 @@ async def fetch_and_store_leagues(db: AsyncSession = Depends(get_db)):
             existing_league = existing_league_result.scalars().one_or_none()
 
             if not existing_league:
-                logger.debug(f"Inserting new league: {league.name} (ID: {league_id})")
-                db.add(league)
-                await db.commit()
-                await db.refresh(league)
-                logger.info(f"League {league.name} (ID: {league_id}) added to the database.")
+                try:
+                    logger.debug(f"Inserting new league: {league.name} (ID: {league_id})")
+                    db.add(league)
+                    await db.commit()
+                    await db.refresh(league)
+                    logger.info(f"League {league.name} (ID: {league_id}) added to the database.")
+                except Exception as e:
+                    logger.error(f"Error inserting league {league_id}: {e}")
+                    await db.rollback()
+                    continue  # Skip processing seasons for this league
             else:
                 logger.info(f"League {league.name} (ID: {league_id}) already exists in the database.")
                 league = existing_league
 
-            # Process seasons
-            if not seasons_data:
-                logger.warning(f"No seasons found for league {league_id}.")
-            else:
-                for season in seasons_data:
-                    start_date, end_date = None, None
-                    try:
-                        if season.get("start"):
-                            start_date = datetime.strptime(season.get("start"), "%Y-%m-%d").date()
-                        if season.get("end"):
-                            end_date = datetime.strptime(season.get("end"), "%Y-%m-%d").date()
-                    except Exception as date_exception:
-                        logger.error(f"Date parsing error for league {league_id} season: {date_exception}")
+            # Process seasons: Only current season
+            current_seasons = [s for s in seasons_data if s.get("current")]
+            if not current_seasons:
+                logger.warning(f"No current season found for league {league_id}.")
+                continue  
 
-                    season_year = season.get("year")
-                    current_season_flag = season.get("current") or False
+            for season in current_seasons:
+                start_date, end_date = None, None
+                try:
+                    if season.get("start"):
+                        start_date = datetime.strptime(season.get("start"), "%Y-%m-%d").date()
+                    if season.get("end"):
+                        end_date = datetime.strptime(season.get("end"), "%Y-%m-%d").date()
+                except Exception as date_exception:
+                    logger.error(f"Date parsing error for league {league_id} season: {date_exception}")
+                    continue  
 
-                    logger.debug(f"League {league_id} - Found season: Year={season_year}, Current={current_season_flag}, Start={start_date}, End={end_date}")
+                season_year = season.get("year")
+                current_season_flag = season.get("current") or False
 
-                    season_data_obj = models.Season(
-                        league_id=league_id,
-                        year=season_year,
-                        start=start_date,
-                        end=end_date,
-                        current=current_season_flag,
-                        coverage=season.get("coverage")
-                    )
+                logger.debug(f"League {league_id} - Found current season: Year={season_year}, Current={current_season_flag}, Start={start_date}, End={end_date}")
 
-                    existing_season_query = select(models.Season).filter(
+                # Ensure only one current season per league
+                # Mark existing current seasons as False
+                try:
+                    update_stmt = update(models.Season).where(
                         models.Season.league_id == league_id,
-                        models.Season.year == season_year
-                    )
-                    existing_season_result = await db.execute(existing_season_query)
-                    existing_season = existing_season_result.scalars().one_or_none()
+                        models.Season.current == True
+                    ).values(current=False)
+                    await db.execute(update_stmt)
+                    logger.debug(f"Marked all existing seasons for league {league_id} as non-current.")
+                except Exception as e:
+                    logger.error(f"Error updating existing seasons for league {league_id}: {e}")
+                    await db.rollback()
+                    continue  # Skip updating current season
 
-                    if not existing_season:
-                        logger.debug(f"Inserting new season for league {league_id}, year {season_year}")
+                # Create or update the current season
+                season_data_obj = models.Season(
+                    league_id=league_id,
+                    year=season_year,
+                    start_date=start_date,    
+                    end_date=end_date,        
+                    current=current_season_flag,
+                    coverage=season.get("coverage")
+                )
+
+                # Check if the current season already exists
+                existing_season_query = select(models.Season).filter(
+                    models.Season.league_id == league_id,
+                    models.Season.year == season_year
+                )
+                existing_season_result = await db.execute(existing_season_query)
+                existing_season = existing_season_result.scalars().one_or_none()
+
+                if not existing_season:
+                    try:
+                        logger.debug(f"Inserting new current season for league {league_id}, year {season_year}")
                         db.add(season_data_obj)
                         await db.commit()
                         await db.refresh(season_data_obj)
                         logger.info(f"Season {season_data_obj.year} for league ID {league_id} added to the database.")
-                    else:
-                        season_fields_updated = False
-                        if existing_season.current != current_season_flag:
-                            logger.debug(f"Updating current flag for season {season_year} of league {league_id} from {existing_season.current} to {current_season_flag}")
-                            existing_season.current = current_season_flag
-                            season_fields_updated = True
+                    except Exception as e:
+                        logger.error(f"Error inserting season {season_year} for league {league_id}: {e}")
+                        await db.rollback()
+                        continue  
+                else:
+                    try:
+                        logger.debug(f"Updating existing current season for league {league_id}, year {season_year}")
+                        existing_season.current = current_season_flag
+                        existing_season.start_date = start_date    
+                        existing_season.end_date = end_date        
+                        existing_season.coverage = season.get("coverage")
+                        await db.commit()
+                        logger.info(f"Season {existing_season.year} for league ID {league_id} updated in the database.")
+                    except Exception as e:
+                        logger.error(f"Error updating season {season_year} for league {league_id}: {e}")
+                        await db.rollback()
+                        continue  
 
-                        if season_fields_updated:
-                            await db.commit()
-                            logger.info(f"Season {season_year} for league ID {league_id} updated in the database.")
-                        else:
-                            logger.debug(f"Season {season_year} for league ID {league_id} is unchanged.")
-
-    # After ingestion, let's log what leagues are in the database
+    # log what leagues are in the database
     all_leagues = await db.execute(select(models.League))
     leagues_in_db = all_leagues.scalars().all()
     logger.debug("Leagues currently in DB:")
     for lg in leagues_in_db:
         logger.debug(f" - ID: {lg.league_id}, Name: {lg.name}")
 
-    return {"message": "Leagues and seasons fetched and stored successfully"}
+    return {"message": "Leagues and current seasons fetched and stored successfully"}

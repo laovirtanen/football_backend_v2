@@ -1,14 +1,14 @@
 # app/routers/ingestion/ingest_teams.py
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
-from app.database import get_db
-from app import models
 import logging
 import os
 import httpx
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.orm import joinedload
+from app.database import get_db
+from app import models
 
 router = APIRouter(
     prefix="/teams",
@@ -17,75 +17,132 @@ router = APIRouter(
 
 API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY")
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 @router.post("/", response_model=dict)
 async def fetch_and_store_teams(db: AsyncSession = Depends(get_db)):
     try:
-        # Fetch current seasons from the database, including the league relationship
+        # Fetch all current seasons with their associated leagues
         seasons_result = await db.execute(
-            select(models.Season).options(selectinload(models.Season.league)).filter(models.Season.current == True)
+            select(models.Season)
+            .options(joinedload(models.Season.league))
+            .filter(models.Season.current == True)
         )
         seasons = seasons_result.scalars().all()
 
         if not seasons:
-            logging.info("No current seasons found.")
+            logger.info("No current seasons found.")
             return {"message": "No current seasons found."}
 
+        if not API_FOOTBALL_KEY:
+            logger.error("API_FOOTBALL_KEY environment variable is not set.")
+            raise HTTPException(status_code=500, detail="API key not configured.")
+
         headers = {
-            'x-apisports-key': API_FOOTBALL_KEY
+            'x-apisports-key': API_FOOTBALL_KEY,
+            'Accept': 'application/json'
         }
 
-        for season in seasons:
-            league_id = season.league_id
-            season_year = season.year  # Use the season's year dynamically
-            league_name = season.league.name
+        async with httpx.AsyncClient() as client:
+            for season in seasons:
+                league_id = season.league_id
+                season_year = season.year
+                league_name = season.league.name
 
-            # Fetch teams for the league and season
-            url = f"https://v3.football.api-sports.io/teams?league={league_id}&season={season_year}"
 
-            async with httpx.AsyncClient() as client:
-                response = await client.get(url, headers=headers)
+                url = "https://v3.football.api-sports.io/teams"
+                params = {
+                    'league': league_id,
+                    'season': season_year
+                }
+
+                logger.info(f"Fetching team data from {url} with params {params}")
+                response = await client.get(url, headers=headers, params=params)
+
                 if response.status_code != 200:
-                    logging.error(f"API Error: {response.text}")
-                    continue  # Skip to next season
+                    logger.error(f"API Error for league {league_name} ({league_id}): {response.status_code} - {response.text}")
+                    continue
 
                 data = response.json()
-                logging.info(f"Fetched {len(data.get('response', []))} teams for league {league_name} in season {season_year}.")
+                teams = data.get("response", [])
+                logger.info(f"Fetched {len(teams)} teams for {league_name} in season {season_year}.")
 
-            teams = data.get("response", [])
+                total_fetched = len(teams)
+                total_skipped = 0  # can be used for additional tracking
+                teams_to_add = []
+                associations_to_add = []
 
-            for item in teams:
-                team_info = item.get("team", {})
+                for item in teams:
+                    team_info = item.get("team", {})
 
-                team = models.Team(
-                    team_id=team_info.get("id"),
-                    name=team_info.get("name"),
-                    code=team_info.get("code"),
-                    country=team_info.get("country"),
-                    founded=team_info.get("founded"),
-                    national=team_info.get("national"),
-                    logo=team_info.get("logo"),
-                    league_id=league_id,
-                    season_year=season_year  # Store the season year
-                )
+                    # Extract team details
+                    team_id = team_info.get("id")
+                    team_name = team_info.get("name")
 
-                # Check if the team already exists for this season
-                existing_team = await db.execute(
-                    select(models.Team).filter(
-                        models.Team.team_id == team.team_id,
-                        models.Team.season_year == season_year
+                    if not team_id or not team_name:
+                        logger.warning("Team information incomplete; skipping.")
+                        total_skipped += 1
+                        continue
+
+                    # Check if the team exists; else create it
+                    existing_team_result = await db.execute(
+                        select(models.Team).filter(models.Team.team_id == team_id)
                     )
-                )
-                result_team = existing_team.scalar_one_or_none()
-                if not result_team:
-                    db.add(team)
+                    team = existing_team_result.scalar_one_or_none()
+
+                    if not team:
+                        team = models.Team(
+                            team_id=team_id,
+                            name=team_name,
+                            code=team_info.get("code"),
+                            country=team_info.get("country"),
+                            founded=team_info.get("founded"),
+                            national=team_info.get("national"),
+                            logo=team_info.get("logo")
+                        )
+                        teams_to_add.append(team)
+                        logger.info(f"New team added: {team_name} (ID: {team_id})")
+
+                    # Create association with the league and season
+                    association = models.TeamLeague(
+                        team=team,
+                        league_id=league_id,
+                        season_year=season_year
+                    )
+
+                    # Check if the association already exists
+                    existing_association_result = await db.execute(
+                        select(models.TeamLeague).filter(
+                            models.TeamLeague.team_id == team_id,
+                            models.TeamLeague.league_id == league_id,
+                            models.TeamLeague.season_year == season_year
+                        )
+                    )
+                    existing_assoc = existing_association_result.scalar_one_or_none()
+
+                    if not existing_assoc:
+                        associations_to_add.append(association)
+                    else:
+                        logger.info(f"Association already exists for team {team_name} (ID: {team_id}), league {league_name}, season {season_year}.")
+
+                # add new teams
+                if teams_to_add:
+                    db.add_all(teams_to_add)
                     await db.commit()
-                    await db.refresh(team)
-                    logging.info(f"Team {team.name} added to the database for season {season_year}.")
-                else:
-                    logging.info(f"Team {team.name} already exists in the database for season {season_year}.")
+                    for t in teams_to_add:
+                        logger.info(f"Team {t.name} (ID: {t.team_id}) added.")
+
+                # add new associations
+                if associations_to_add:
+                    db.add_all(associations_to_add)
+                    await db.commit()
+                    for assoc in associations_to_add:
+                        logger.info(f"Association added: Team ID {assoc.team_id}, League ID {assoc.league_id}, Season {assoc.season_year}.")
+
+                logger.info(f"Fetched {total_fetched} teams, skipped {total_skipped} teams for {league_name}.")
 
         return {"message": "Teams fetched and stored successfully"}
     except Exception as e:
-        logging.error(f"An error occurred: {e}")
+        logger.error(f"An unexpected error occurred: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

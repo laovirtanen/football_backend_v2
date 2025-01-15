@@ -29,7 +29,9 @@ async def get_leagues(
         leagues = result.scalars().all()
         return leagues
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import logging
+        logging.error(f"Error fetching leagues: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
 @router.get("/{league_id}", response_model=schemas.LeagueWithTeams)
 async def get_league_by_id(
@@ -44,8 +46,7 @@ async def get_league_by_id(
             select(models.League)
             .where(models.League.league_id == league_id)
             .options(
-                # Eager load teams
-                selectinload(models.League.teams)
+                selectinload(models.League.teams).selectinload(models.TeamLeague.team)
             )
         )
         league = result.scalar_one_or_none()
@@ -53,4 +54,6 @@ async def get_league_by_id(
             raise HTTPException(status_code=404, detail="League not found")
         return league
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import logging
+        logging.error(f"Error fetching league by ID {league_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")

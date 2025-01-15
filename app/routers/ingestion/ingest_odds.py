@@ -35,7 +35,7 @@ async def fetch_and_store_odds(db: AsyncSession = Depends(get_db)):
         }
 
         async with httpx.AsyncClient() as client:
-            # Fetch fixtures within a certain date range (modify as needed)
+            # Fetch fixtures within a certain date range 
             start_date = datetime.utcnow()
             end_date = start_date + timedelta(days=14)
             fixtures_result = await db.execute(

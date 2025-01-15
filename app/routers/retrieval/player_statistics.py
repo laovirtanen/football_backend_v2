@@ -1,5 +1,3 @@
-# app/routers/retrieval/player_statistics.py
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -15,16 +13,13 @@ router = APIRouter(
 
 @router.get("/", response_model=List[schemas.PlayerStatisticsBase])
 async def get_player_statistics(
-    player_id: Optional[int] = Query(None, description="Filter by player ID"),
-    league_id: Optional[int] = Query(None, description="Filter by league ID"),
-    season_year: Optional[int] = Query(None, description="Filter by season year"),
+    player_id: Optional[int] = Query(None),
+    league_id: Optional[int] = Query(None),
+    season_year: Optional[int] = Query(None),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Retrieve player statistics with optional filters.
-    """
     try:
         query = select(models.PlayerStatistics)
         

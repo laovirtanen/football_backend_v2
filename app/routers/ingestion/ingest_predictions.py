@@ -35,7 +35,7 @@ async def fetch_and_store_predictions(db: AsyncSession = Depends(get_db)):
         }
 
         async with httpx.AsyncClient() as client:
-            # Fetch all fixtures (you can modify the date range as needed)
+            # Fetch all fixtures 
             fixtures_result = await db.execute(
                 select(models.Fixture.fixture_id)
             )
